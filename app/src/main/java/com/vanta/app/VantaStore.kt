@@ -1,14 +1,20 @@
 package com.vanta.app
+
 import android.content.Context
 import android.util.Base64
 import java.security.KeyStore
 import javax.crypto.Cipher
 import javax.crypto.KeyGenerator
 import javax.crypto.spec.GCMParameterSpec
+import org.json.JSONArray
+import org.json.JSONObject
+
+data class SavedChatMessage(val user: Boolean, val text: String)
 
 class VantaStore(context: Context) {
     private val prefs = context.getSharedPreferences("vanta", Context.MODE_PRIVATE)
     private val alias = "vanta_api_key"
+
     private fun key(): javax.crypto.SecretKey {
         val ks = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
         if (!ks.containsAlias(alias)) {
@@ -18,13 +24,18 @@ class VantaStore(context: Context) {
         }
         return (ks.getEntry(alias, null) as KeyStore.SecretKeyEntry).secretKey
     }
+
     fun saveApiKey(value: String) {
-        if (value.isBlank()) { prefs.edit().remove("api").apply(); return }
+        if (value.isBlank()) {
+            prefs.edit().remove("api").apply()
+            return
+        }
         val cipher = Cipher.getInstance("AES/GCM/NoPadding")
         cipher.init(Cipher.ENCRYPT_MODE, key())
         val combined = cipher.iv + cipher.doFinal(value.toByteArray(Charsets.UTF_8))
         prefs.edit().putString("api", Base64.encodeToString(combined, Base64.NO_WRAP)).apply()
     }
+
     fun loadApiKey(): String {
         val encoded = prefs.getString("api", null) ?: return ""
         return runCatching {
@@ -34,6 +45,47 @@ class VantaStore(context: Context) {
             String(cipher.doFinal(bytes.copyOfRange(12, bytes.size)), Charsets.UTF_8)
         }.getOrDefault("")
     }
+
     fun loadModel(): String = prefs.getString("model", "gpt-6-luna") ?: "gpt-6-luna"
     fun saveModel(value: String) { prefs.edit().putString("model", value.trim().ifBlank { "gpt-6-luna" }).apply() }
+
+    fun loadPersonality(): String = prefs.getString("personality", "direct, warm, futuristic, honest") ?: "direct, warm, futuristic, honest"
+    fun savePersonality(value: String) { prefs.edit().putString("personality", value.trim().take(300)).apply() }
+
+    fun loadProject(): String = prefs.getString("project", "General") ?: "General"
+    fun saveProject(value: String) { prefs.edit().putString("project", value.trim().ifBlank { "General" }).apply() }
+
+    fun loadVoiceSpeed(): Float = prefs.getFloat("voice_speed", 1.0f)
+    fun saveVoiceSpeed(value: Float) { prefs.edit().putFloat("voice_speed", value.coerceIn(0.65f, 1.5f)).apply() }
+
+    fun loadVoicePitch(): Float = prefs.getFloat("voice_pitch", 1.0f)
+    fun saveVoicePitch(value: Float) { prefs.edit().putFloat("voice_pitch", value.coerceIn(0.75f, 1.3f)).apply() }
+
+    fun loadTemporaryChat(): Boolean = prefs.getBoolean("temporary_chat", false)
+    fun saveTemporaryChat(value: Boolean) { prefs.edit().putBoolean("temporary_chat", value).apply() }
+
+    fun loadWakeEnabled(): Boolean = prefs.getBoolean("wake_enabled", false)
+    fun saveWakeEnabled(value: Boolean) { prefs.edit().putBoolean("wake_enabled", value).apply() }
+
+    fun saveChat(messages: List<SavedChatMessage>) {
+        if (loadTemporaryChat()) return
+        val arr = JSONArray()
+        messages.takeLast(40).forEach {
+            arr.put(JSONObject().put("user", it.user).put("text", it.text))
+        }
+        prefs.edit().putString("chat", arr.toString()).apply()
+    }
+
+    fun loadChat(): List<SavedChatMessage> {
+        val raw = prefs.getString("chat", null) ?: return emptyList()
+        return runCatching {
+            val arr = JSONArray(raw)
+            List(arr.length()) {
+                val obj = arr.getJSONObject(it)
+                SavedChatMessage(obj.optBoolean("user"), obj.optString("text"))
+            }
+        }.getOrDefault(emptyList())
+    }
+
+    fun clearChat() = prefs.edit().remove("chat").apply()
 }

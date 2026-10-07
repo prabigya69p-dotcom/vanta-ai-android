@@ -1,17 +1,25 @@
 # VANTA — Android AI Assistant
 
-VANTA is a clean, tool-ready Android AI assistant built with Kotlin + Jetpack Compose.
+VANTA is a clean, adaptive Android AI assistant built with Kotlin + Jetpack Compose.
 
-## UI Preview
+## Feature set in this build
 
-![VANTA UI Preview](docs/vanta-ui-preview.svg)
+- Smart routing with Research / Study / Create / Developer / Mission / Focus / Fact-check / Compare modes
+- Persistent conversation context with temporary-chat support
+- Encrypted API-key storage and configurable model
+- Photo attachments and camera capture
+- File picker with image, text-file and first-page PDF vision support
+- Multimodal image analysis
+- Streaming normal-chat responses
+- Web research with source links
+- Long-term local memory: “remember …”, “what do you remember”, “forget …”
+- Local actions: open common apps, timer, alarm, time, calculator, media-control request
+- Interruptible voice input and configurable TTS speed/pitch
+- Optional visible “Hey VANTA” foreground wake listener
+- Image generation through the current GPT Image model
+- Android share-in for images
+- Project / Space context
+- Dark-blue VANTA HUD-style interface
+- GitHub Actions debug APK build
 
-The preview shows the intended clean dark-blue VANTA interface: unified chat, quick actions, research, create/study tools, and voice input.
-
-## Design
-
-Figma design: https://www.figma.com/design/RNHcFGcabFoaw7oti4thYv
-
-## Build
-
-GitHub Actions builds a debug APK automatically on pushes to main or manual workflow dispatch.
+The implementation intentionally keeps sensitive OS actions permission-gated and uses Android system surfaces where possible.
