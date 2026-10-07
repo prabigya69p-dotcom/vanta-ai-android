@@ -324,7 +324,7 @@ private fun ChatScreen(
                     val reply = withContext(Dispatchers.IO) {
                         api.askStreaming(text, instructions, false, imageDataUrls, history) { delta ->
                             streamed += delta
-                            runOnUiThread {
+                            activity.runOnUiThread {
                                 messages = messages.dropLast(1) + ChatMessage(false, streamed)
                             }
                         }
