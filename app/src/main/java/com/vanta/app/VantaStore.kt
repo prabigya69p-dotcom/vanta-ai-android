@@ -13,7 +13,7 @@ data class SavedChatMessage(val user: Boolean, val text: String)
 
 class VantaStore(context: Context) {
     private val prefs = context.getSharedPreferences("vanta", Context.MODE_PRIVATE)
-    private val alias = "vanta_api_key"
+    private val alias = "vanta_api_key_v2"
 
     private fun key(): javax.crypto.SecretKey {
         val ks = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
@@ -25,21 +25,23 @@ class VantaStore(context: Context) {
         return (ks.getEntry(alias, null) as KeyStore.SecretKeyEntry).secretKey
     }
 
-    fun saveApiKey(value: String) {
-        if (value.isBlank()) {
-            prefs.edit().remove("api").apply()
-            return
+    fun saveApiKey(value: String): Boolean {
+        val normalized = value.trim()
+        if (normalized.isBlank()) {
+            prefs.edit().remove("api_v2").commit()
+            return true
         }
         val cipher = Cipher.getInstance("AES/GCM/NoPadding")
         cipher.init(Cipher.ENCRYPT_MODE, key())
-        val combined = cipher.iv + cipher.doFinal(value.toByteArray(Charsets.UTF_8))
-        prefs.edit()
-            .putString("api", Base64.encodeToString(combined, Base64.NO_WRAP))
-            .apply()
+        val combined = cipher.iv + cipher.doFinal(normalized.toByteArray(Charsets.UTF_8))
+        val saved = prefs.edit()
+            .putString("api_v2", Base64.encodeToString(combined, Base64.NO_WRAP))
+            .commit()
+        return saved && loadApiKey() == normalized
     }
 
     fun loadApiKey(): String {
-        val encoded = prefs.getString("api", null) ?: return ""
+        val encoded = prefs.getString("api_v2", null) ?: return ""
         return runCatching {
             val bytes = Base64.decode(encoded, Base64.NO_WRAP)
             val cipher = Cipher.getInstance("AES/GCM/NoPadding")

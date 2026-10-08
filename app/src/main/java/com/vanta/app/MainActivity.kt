@@ -600,6 +600,7 @@ private fun SettingsScreen(
     var pitch by remember { mutableFloatStateOf(store.loadVoicePitch()) }
     var temporary by remember { mutableStateOf(store.loadTemporaryChat()) }
     var wake by remember { mutableStateOf(store.loadWakeEnabled()) }
+    var saveStatus by remember { mutableStateOf("") }
     val context = LocalContext.current
 
     Column(
@@ -611,10 +612,10 @@ private fun SettingsScreen(
         Text("VANTA Settings", fontSize = 25.sp, color = Color.White)
         Spacer(Modifier.height(16.dp))
 
-        Text("OpenAI API key", color = Color(0xFF8EB5DC))
+        Text("NVIDIA NIM API key", color = Color(0xFF8EB5DC))
         OutlinedTextField(
             key, { key = it }, Modifier.fillMaxWidth(), singleLine = true,
-            visualTransformation = PasswordVisualTransformation(), placeholder = { Text("sk-…") }
+            visualTransformation = PasswordVisualTransformation(), placeholder = { Text("nvapi-…") }
         )
 
         Spacer(Modifier.height(12.dp))
@@ -668,15 +669,26 @@ private fun SettingsScreen(
 
         Spacer(Modifier.height(18.dp))
         Button(onClick = {
-            store.saveApiKey(key)
-            store.saveModel(model)
-            store.savePersonality(personality)
-            store.saveProject(project)
-            store.saveVoiceSpeed(speed)
-            store.saveVoicePitch(pitch)
-            store.saveTemporaryChat(temporary)
-            onBack()
-        }) { Text("Save") }
+            saveStatus = if (store.saveApiKey(key)) {
+                store.saveModel(model)
+                store.savePersonality(personality)
+                store.saveProject(project)
+                store.saveVoiceSpeed(speed)
+                store.saveVoicePitch(pitch)
+                store.saveTemporaryChat(temporary)
+                "Saved securely on this device ✓"
+            } else {
+                "Could not save the API key"
+            }
+        }) { Text("Save settings") }
+
+        if (saveStatus.isNotBlank()) {
+            Text(
+                saveStatus,
+                color = if (saveStatus.startsWith("Saved")) Color(0xFF73E6A8) else Color(0xFFFF8A8A),
+                fontSize = 12.sp
+            )
+        }
 
         TextButton(onClick = { store.clearChat(); onBack() }) { Text("New chat / clear history") }
         TextButton(onClick = { memory.clear() }) { Text("Clear memory") }
