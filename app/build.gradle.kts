@@ -6,7 +6,7 @@ plugins {
 }
 android {
     namespace = "com.vanta.app"
-    compileSdk = 36
+    compileSdk = 37
     defaultConfig {
         applicationId = "com.vanta.app"
         minSdk = 26
