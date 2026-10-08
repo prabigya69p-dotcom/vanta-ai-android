@@ -322,9 +322,8 @@ private fun ChatScreen(
                     currentAttachments.flatMap { attachmentToDataUrls(context, it) }
                 }.take(8)
                 val attachmentContext = withContext(Dispatchers.IO) {
-                    currentAttachments.mapNotNull { attachmentContextText(context, it) }.joinToString("
-
-")
+                    currentAttachments.mapNotNull { attachmentContextText(context, it) }.joinToString(" ")
+                }
                 }
                 val requestText = if (attachmentContext.isBlank()) text
                     else text + " ATTACHMENT CONTEXT: " + attachmentContext
@@ -748,18 +747,22 @@ private fun extractDocxText(context: Context, uri: Uri): String {
     context.contentResolver.openInputStream(uri)?.use { input ->
         temp.outputStream().use { input.copyTo(it) }
     }
-    return java.util.zip.ZipFile(temp).use { zip ->
-        val entry = zip.getEntry("word/document.xml") ?: return@use ""
-        zip.getInputStream(entry).bufferedReader().use { reader ->
-            reader.readText()
-                .replace(Regex("<w:tab\s*/>"), "\t")
-                .replace(Regex("<w:br\s*/>"), "\n")
-                .replace(Regex("</w:p>"), "\n")
-                .replace(Regex("<[^>]+>"), " ")
-                .replace(Regex("\s+"), " ")
-                .trim()
+    return runCatching {
+        java.util.zip.ZipFile(temp).use { zip ->
+            val entry = zip.getEntry("word/document.xml") ?: return@use ""
+            zip.getInputStream(entry).bufferedReader().use { reader ->
+                reader.readText()
+                    .replace("<w:tab/>", "	")
+                    .replace("<w:tab />", "	")
+                    .replace("</w:p>", "
+")
+                    .replace(Regex("<[^>]+>"), " ")
+                    .replace(Regex(" +"), " ")
+                    .trim()
+            }
         }
-    }.also { temp.delete() }
+    }.getOrDefault("")
+        .also { temp.delete() }
 }
 
 private fun pdfPageCount(context: Context, uri: Uri): Int? = runCatching {

@@ -310,18 +310,29 @@ class WakeService : Service() {
 data class WakeMatch(val query: String)
 
 object WakeMatcher {
-    private val wakePattern = Regex("\b(?:hey|a)\s+(?:vanta|venta|venda|vantah|vanda)\b", RegexOption.IGNORE_CASE)
+    private val leadWords = setOf("hey", "a")
+    private val wakeWords = setOf("vanta", "venta", "venda", "vantah", "vanda")
 
     fun match(value: String): WakeMatch? {
-        val clean = normalize(value)
-        val match = wakePattern.find(clean) ?: return null
-        val query = clean.removeRange(match.range).trim().trimStart(',', ':', '-', '.')
-        return WakeMatch(query)
+        val tokens = normalize(value)
+        for (i in 0 until tokens.size - 1) {
+            if (tokens[i] in leadWords && tokens[i + 1] in wakeWords) {
+                return WakeMatch(tokens.drop(i + 2).joinToString(" "))
+            }
+        }
+        return null
     }
 
-    private fun normalize(value: String): String = value
-        .lowercase(Locale.getDefault())
-        .replace(Regex("[^\p{L}\p{N}\s,:.-]"), " ")
-        .replace(Regex("\s+"), " ")
-        .trim()
+    private fun normalize(value: String): List<String> =
+        value.lowercase(Locale.getDefault())
+            .map { ch ->
+                when {
+                    ch.isLetterOrDigit() || ch.isWhitespace() -> ch
+                    else -> ' '
+                }
+            }
+            .joinToString("")
+            .split(' ', '
+', '	')
+            .filter { it.isNotBlank() }
 }
