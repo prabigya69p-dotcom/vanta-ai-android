@@ -66,6 +66,47 @@ class VantaStore(context: Context) {
         return ""
     }
 
+    private fun saveEncrypted(prefKey: String, value: String): Boolean {
+        val normalized = value.trim()
+        if (normalized.isBlank()) {
+            return prefs.edit().remove(prefKey).commit()
+        }
+        val cipher = Cipher.getInstance("AES/GCM/NoPadding")
+        cipher.init(Cipher.ENCRYPT_MODE, key())
+        val combined = cipher.iv + cipher.doFinal(normalized.toByteArray(Charsets.UTF_8))
+        val saved = prefs.edit()
+            .putString(prefKey, Base64.encodeToString(combined, Base64.NO_WRAP))
+            .commit()
+        return saved && loadEncrypted(prefKey) == normalized
+    }
+
+    private fun loadEncrypted(prefKey: String): String {
+        val encoded = prefs.getString(prefKey, null) ?: return ""
+        return runCatching {
+            val bytes = Base64.decode(encoded, Base64.NO_WRAP)
+            require(bytes.size > 12)
+            val cipher = Cipher.getInstance("AES/GCM/NoPadding")
+            cipher.init(
+                Cipher.DECRYPT_MODE,
+                key(),
+                GCMParameterSpec(128, bytes.copyOfRange(0, 12))
+            )
+            String(cipher.doFinal(bytes.copyOfRange(12, bytes.size)), Charsets.UTF_8)
+        }.getOrDefault("")
+    }
+
+    fun saveElevenLabsApiKey(value: String): Boolean =
+        saveEncrypted("elevenlabs_api_v1", value)
+
+    fun loadElevenLabsApiKey(): String =
+        loadEncrypted("elevenlabs_api_v1")
+
+    fun saveElevenLabsVoiceId(value: String): Boolean =
+        saveEncrypted("elevenlabs_voice_v1", value)
+
+    fun loadElevenLabsVoiceId(): String =
+        loadEncrypted("elevenlabs_voice_v1")
+
     fun loadModel(): String =
         prefs.getString("model", "qwen/qwen3.5-122b-a10b") ?: "qwen/qwen3.5-122b-a10b"
 
