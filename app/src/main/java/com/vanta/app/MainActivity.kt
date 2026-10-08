@@ -16,6 +16,7 @@ import android.speech.RecognizerIntent
 import android.speech.SpeechRecognizer
 import android.speech.tts.TextToSpeech
 import android.speech.tts.UtteranceProgressListener
+import android.media.MediaPlayer
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -69,6 +70,7 @@ class MainActivity : ComponentActivity() {
     private lateinit var memory: VantaMemoryStore
     private var recognizer: SpeechRecognizer? = null
     private var tts: TextToSpeech? = null
+    private var elevenPlayer: MediaPlayer? = null
     private val incomingImage = mutableStateOf<Uri?>(null)
     private val incomingWakeQuery = mutableStateOf<String?>(null)
 
@@ -120,6 +122,44 @@ class MainActivity : ComponentActivity() {
 
     fun speak(text: String) {
         stopListening()
+        val elevenKey = store.loadElevenLabsApiKey()
+        val elevenVoice = store.loadElevenLabsVoiceId()
+        if (elevenKey.isNotBlank() && elevenVoice.isNotBlank()) {
+            WakeService.pause(this)
+            Thread {
+                val audio = ElevenLabsApi.synthesize(this, elevenKey, elevenVoice, text)
+                runOnUiThread {
+                    if (audio == null) {
+                        WakeService.resume(this)
+                        applyTtsSettings()
+                        tts?.speak(text, TextToSpeech.QUEUE_FLUSH, null, "vanta_reply")
+                    } else {
+                        elevenPlayer?.release()
+                        elevenPlayer = MediaPlayer().apply {
+                            setDataSource(audio.absolutePath)
+                            setOnCompletionListener {
+                                release()
+                                elevenPlayer = null
+                                audio.delete()
+                                WakeService.resume(this@MainActivity)
+                            }
+                            setOnErrorListener { player, _, _ ->
+                                player.release()
+                                elevenPlayer = null
+                                audio.delete()
+                                WakeService.resume(this@MainActivity)
+                                applyTtsSettings()
+                                tts?.speak(text, TextToSpeech.QUEUE_FLUSH, null, "vanta_reply_fallback")
+                                true
+                            }
+                            prepare()
+                            start()
+                        }
+                    }
+                }
+            }.start()
+            return
+        }
         applyTtsSettings()
         tts?.speak(text, TextToSpeech.QUEUE_FLUSH, null, "vanta_reply")
     }
@@ -593,6 +633,8 @@ private fun SettingsScreen(
     onBack: () -> Unit
 ) {
     var key by remember { mutableStateOf(store.loadApiKey()) }
+    var elevenKey by remember { mutableStateOf(store.loadElevenLabsApiKey()) }
+    var elevenVoice by remember { mutableStateOf(store.loadElevenLabsVoiceId()) }
     var model by remember { mutableStateOf(store.loadModel()) }
     var personality by remember { mutableStateOf(store.loadPersonality()) }
     var project by remember { mutableStateOf(store.loadProject()) }
@@ -616,6 +658,20 @@ private fun SettingsScreen(
         OutlinedTextField(
             key, { key = it }, Modifier.fillMaxWidth(), singleLine = true,
             visualTransformation = PasswordVisualTransformation(), placeholder = { Text("nvapi-…") }
+        )
+
+        Spacer(Modifier.height(12.dp))
+        Text("ElevenLabs API key", color = Color(0xFF8EB5DC))
+        OutlinedTextField(
+            elevenKey, { elevenKey = it }, Modifier.fillMaxWidth(), singleLine = true,
+            visualTransformation = PasswordVisualTransformation(),
+            placeholder = { Text("sk_…") }
+        )
+        Spacer(Modifier.height(8.dp))
+        Text("ElevenLabs Voice ID", color = Color(0xFF8EB5DC))
+        OutlinedTextField(
+            elevenVoice, { elevenVoice = it }, Modifier.fillMaxWidth(), singleLine = true,
+            placeholder = { Text("Your ElevenLabs voice ID") }
         )
 
         Spacer(Modifier.height(12.dp))
@@ -669,7 +725,10 @@ private fun SettingsScreen(
 
         Spacer(Modifier.height(18.dp))
         Button(onClick = {
-            saveStatus = if (store.saveApiKey(key)) {
+            saveStatus = if (store.saveApiKey(key) &&
+                store.saveElevenLabsApiKey(elevenKey) &&
+                store.saveElevenLabsVoiceId(elevenVoice)
+            ) {
                 store.saveModel(model)
                 store.savePersonality(personality)
                 store.saveProject(project)
