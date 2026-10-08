@@ -314,17 +314,7 @@ object WakeMatcher {
     private val wakeWords = setOf("vanta", "venta", "venda", "vantah", "vanda")
 
     fun match(value: String): WakeMatch? {
-        val tokens = normalize(value)
-        for (i in 0 until tokens.size - 1) {
-            if (tokens[i] in leadWords && tokens[i + 1] in wakeWords) {
-                return WakeMatch(tokens.drop(i + 2).joinToString(" "))
-            }
-        }
-        return null
-    }
-
-    private fun normalize(value: String): List<String> =
-        value.lowercase(Locale.getDefault())
+        val normalized = value.lowercase(Locale.getDefault())
             .map { ch ->
                 when {
                     ch.isLetterOrDigit() || ch.isWhitespace() -> ch
@@ -332,7 +322,15 @@ object WakeMatcher {
                 }
             }
             .joinToString("")
-            .split(' ', '
-', '	')
-            .filter { it.isNotBlank() }
+            .replace('
+', ' ')
+            .replace('	', ' ')
+        val tokens = normalized.split(' ').filter { it.isNotBlank() }
+        for (i in 0 until tokens.size - 1) {
+            if (tokens[i] in leadWords && tokens[i + 1] in wakeWords) {
+                return WakeMatch(tokens.drop(i + 2).joinToString(" "))
+            }
+        }
+        return null
+    }
 }

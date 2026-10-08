@@ -752,10 +752,9 @@ private fun extractDocxText(context: Context, uri: Uri): String {
             val entry = zip.getEntry("word/document.xml") ?: return@use ""
             zip.getInputStream(entry).bufferedReader().use { reader ->
                 reader.readText()
-                    .replace("<w:tab/>", "	")
-                    .replace("<w:tab />", "	")
-                    .replace("</w:p>", "
-")
+                    .replace("<w:tab/>", " ")
+                    .replace("<w:tab />", " ")
+                    .replace("</w:p>", " ")
                     .replace(Regex("<[^>]+>"), " ")
                     .replace(Regex(" +"), " ")
                     .trim()
