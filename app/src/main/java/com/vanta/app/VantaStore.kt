@@ -33,7 +33,9 @@ class VantaStore(context: Context) {
         val cipher = Cipher.getInstance("AES/GCM/NoPadding")
         cipher.init(Cipher.ENCRYPT_MODE, key())
         val combined = cipher.iv + cipher.doFinal(value.toByteArray(Charsets.UTF_8))
-        prefs.edit().putString("api", Base64.encodeToString(combined, Base64.NO_WRAP)).apply()
+        prefs.edit()
+            .putString("api", Base64.encodeToString(combined, Base64.NO_WRAP))
+            .apply()
     }
 
     fun loadApiKey(): String {
@@ -41,31 +43,62 @@ class VantaStore(context: Context) {
         return runCatching {
             val bytes = Base64.decode(encoded, Base64.NO_WRAP)
             val cipher = Cipher.getInstance("AES/GCM/NoPadding")
-            cipher.init(Cipher.DECRYPT_MODE, key(), GCMParameterSpec(128, bytes.copyOfRange(0, 12)))
+            cipher.init(
+                Cipher.DECRYPT_MODE,
+                key(),
+                GCMParameterSpec(128, bytes.copyOfRange(0, 12))
+            )
             String(cipher.doFinal(bytes.copyOfRange(12, bytes.size)), Charsets.UTF_8)
         }.getOrDefault("")
     }
 
-    fun loadModel(): String = prefs.getString("model", "gpt-6-luna") ?: "gpt-6-luna"
-    fun saveModel(value: String) { prefs.edit().putString("model", value.trim().ifBlank { "gpt-6-luna" }).apply() }
+    fun loadModel(): String =
+        prefs.getString("model", "qwen/qwen3.5-122b-a10b") ?: "qwen/qwen3.5-122b-a10b"
 
-    fun loadPersonality(): String = prefs.getString("personality", "direct, warm, futuristic, honest") ?: "direct, warm, futuristic, honest"
-    fun savePersonality(value: String) { prefs.edit().putString("personality", value.trim().take(300)).apply() }
+    fun saveModel(value: String) {
+        prefs.edit()
+            .putString("model", value.trim().ifBlank { "qwen/qwen3.5-122b-a10b" })
+            .apply()
+    }
 
-    fun loadProject(): String = prefs.getString("project", "General") ?: "General"
-    fun saveProject(value: String) { prefs.edit().putString("project", value.trim().ifBlank { "General" }).apply() }
+    fun loadPersonality(): String =
+        prefs.getString("personality", "direct, warm, futuristic, honest")
+            ?: "direct, warm, futuristic, honest"
+
+    fun savePersonality(value: String) {
+        prefs.edit().putString("personality", value.trim().take(300)).apply()
+    }
+
+    fun loadProject(): String =
+        prefs.getString("project", "General") ?: "General"
+
+    fun saveProject(value: String) {
+        prefs.edit().putString("project", value.trim().ifBlank { "General" }).apply()
+    }
 
     fun loadVoiceSpeed(): Float = prefs.getFloat("voice_speed", 1.0f)
-    fun saveVoiceSpeed(value: Float) { prefs.edit().putFloat("voice_speed", value.coerceIn(0.65f, 1.5f)).apply() }
+
+    fun saveVoiceSpeed(value: Float) {
+        prefs.edit().putFloat("voice_speed", value.coerceIn(0.65f, 1.5f)).apply()
+    }
 
     fun loadVoicePitch(): Float = prefs.getFloat("voice_pitch", 1.0f)
-    fun saveVoicePitch(value: Float) { prefs.edit().putFloat("voice_pitch", value.coerceIn(0.75f, 1.3f)).apply() }
+
+    fun saveVoicePitch(value: Float) {
+        prefs.edit().putFloat("voice_pitch", value.coerceIn(0.75f, 1.3f)).apply()
+    }
 
     fun loadTemporaryChat(): Boolean = prefs.getBoolean("temporary_chat", false)
-    fun saveTemporaryChat(value: Boolean) { prefs.edit().putBoolean("temporary_chat", value).apply() }
+
+    fun saveTemporaryChat(value: Boolean) {
+        prefs.edit().putBoolean("temporary_chat", value).apply()
+    }
 
     fun loadWakeEnabled(): Boolean = prefs.getBoolean("wake_enabled", false)
-    fun saveWakeEnabled(value: Boolean) { prefs.edit().putBoolean("wake_enabled", value).apply() }
+
+    fun saveWakeEnabled(value: Boolean) {
+        prefs.edit().putBoolean("wake_enabled", value).apply()
+    }
 
     fun saveChat(messages: List<SavedChatMessage>) {
         if (loadTemporaryChat()) return
