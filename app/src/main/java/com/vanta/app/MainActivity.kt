@@ -327,10 +327,7 @@ private fun ChatScreen(
 ")
                 }
                 val requestText = if (attachmentContext.isBlank()) text
-                    else text + "
-
-ATTACHMENT CONTEXT:
-" + attachmentContext
+                    else text + "\n\nATTACHMENT CONTEXT:\n" + attachmentContext
 
                 val history = messages.dropLast(1).takeLast(10).map { SavedChatMessage(it.user, it.text) }
                 val instructions = VantaSmart.instructions(
@@ -730,13 +727,11 @@ private fun attachmentContextText(context: Context, attachment: VantaAttachment)
         when {
             VantaAttachmentInspector.isDocx(mime, attachment.name) -> {
                 val text = extractDocxText(context, uri)
-                "Document: " + attachment.name + "
-" + text.take(12000)
+                "Document: " + attachment.name + "\n" + text.take(12000)
             }
             VantaAttachmentInspector.isTextLike(mime, attachment.name) -> {
                 val text = context.contentResolver.openInputStream(uri)?.bufferedReader()?.use { it.readText() }.orEmpty()
-                "Text file: " + attachment.name + "
-" + text.take(12000)
+                "Text file: " + attachment.name + "\n" + text.take(12000)
             }
             mime == "application/pdf" || attachment.name.lowercase(Locale.getDefault()).endsWith(".pdf") -> {
                 val pages = pdfPageCount(context, uri)
@@ -757,13 +752,13 @@ private fun extractDocxText(context: Context, uri: Uri): String {
         val entry = zip.getEntry("word/document.xml") ?: return@use ""
         zip.getInputStream(entry).bufferedReader().use { reader ->
             reader.readText()
-                .replace(Regex("<w:tab\s*/>"), "	")
-                .replace(Regex("<w:br\s*/>"), "
+                .replace(Regex("<w:tab\\s*/>"), "	")
+                .replace(Regex("<w:br\\s*/>"), "
 ")
                 .replace(Regex("</w:p>"), "
 ")
                 .replace(Regex("<[^>]+>"), " ")
-                .replace(Regex("\s+"), " ")
+                .replace(Regex("\\s+"), " ")
                 .trim()
         }
     }.also { temp.delete() }
