@@ -327,7 +327,7 @@ private fun ChatScreen(
 ")
                 }
                 val requestText = if (attachmentContext.isBlank()) text
-                    else text + "\n\nATTACHMENT CONTEXT:\n" + attachmentContext
+                    else text + " ATTACHMENT CONTEXT: " + attachmentContext
 
                 val history = messages.dropLast(1).takeLast(10).map { SavedChatMessage(it.user, it.text) }
                 val instructions = VantaSmart.instructions(
