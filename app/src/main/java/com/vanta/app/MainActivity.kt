@@ -324,7 +324,6 @@ private fun ChatScreen(
                 val attachmentContext = withContext(Dispatchers.IO) {
                     currentAttachments.mapNotNull { attachmentContextText(context, it) }.joinToString(" ")
                 }
-                }
                 val requestText = if (attachmentContext.isBlank()) text
                     else text + " ATTACHMENT CONTEXT: " + attachmentContext
 

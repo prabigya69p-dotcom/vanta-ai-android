@@ -317,14 +317,12 @@ object WakeMatcher {
         val normalized = value.lowercase(Locale.getDefault())
             .map { ch ->
                 when {
-                    ch.isLetterOrDigit() || ch.isWhitespace() -> ch
+                    ch.isLetterOrDigit() -> ch
+                    ch.isWhitespace() -> ' '
                     else -> ' '
                 }
             }
             .joinToString("")
-            .replace('
-', ' ')
-            .replace('	', ' ')
         val tokens = normalized.split(' ').filter { it.isNotBlank() }
         for (i in 0 until tokens.size - 1) {
             if (tokens[i] in leadWords && tokens[i + 1] in wakeWords) {
