@@ -15,12 +15,15 @@ import android.speech.RecognitionListener
 import android.speech.RecognizerIntent
 import android.speech.SpeechRecognizer
 import android.speech.tts.TextToSpeech
+import android.speech.tts.UtteranceProgressListener
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -85,6 +88,12 @@ class MainActivity : ComponentActivity() {
         handleIncomingIntent(intent)
         tts = TextToSpeech(this) { status ->
             if (status == TextToSpeech.SUCCESS) applyTtsSettings()
+        }.also { engine ->
+            engine.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
+                override fun onStart(utteranceId: String?) { WakeService.pause(this@MainActivity) }
+                override fun onDone(utteranceId: String?) { WakeService.resume(this@MainActivity) }
+                override fun onError(utteranceId: String?) { WakeService.resume(this@MainActivity) }
+            })
         }
         setContent { VantaApp(store, memory, this, incomingImage, incomingWakeQuery) }
     }
@@ -219,6 +228,8 @@ private fun ChatScreen(
     var mode by remember { mutableStateOf(VantaMode.SMART) }
     var modeMenu by remember { mutableStateOf(false) }
     var attachments by remember { mutableStateOf(listOf<VantaAttachment>()) }
+    var deepResearch by remember { mutableStateOf(false) }
+    var activityStatus by remember { mutableStateOf("Ready") }
     var messages by remember {
         mutableStateOf(
             store.loadChat().map { ChatMessage(it.user, it.text) }.ifEmpty {
@@ -230,8 +241,9 @@ private fun ChatScreen(
     val imagePicker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
         uri?.let { attachments = attachments + VantaAttachment(uri = it, name = "Photo") }
     }
-    val filePicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
-        if (uri != null) attachments = attachments + VantaAttachment(uri = uri, name = displayName(context, uri))
+    val filePicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris ->
+        val next = uris.map { VantaAttachment(uri = it, name = displayName(context, it)) }
+        attachments = (attachments + next).take(8)
     }
     val cameraPicker = rememberLauncherForActivityResult(ActivityResultContracts.TakePicturePreview()) { bitmap ->
         if (bitmap != null) attachments = attachments + VantaAttachment(bitmap = bitmap, name = "Camera")
@@ -267,16 +279,24 @@ private fun ChatScreen(
 
         val text = prompt.ifEmpty { "Analyze these attachments." }
         val detectedMode = VantaSmart.modeFor(text, mode)
-        val research = VantaSmart.shouldResearch(text, mode)
         val local = if (currentAttachments.isEmpty()) VantaLocalCommandRouter.execute(context, text, memory) else null
+        val route = VantaRouter.decide(
+            prompt = text,
+            selectedMode = detectedMode,
+            hasAttachments = currentAttachments.isNotEmpty(),
+            deepResearchRequested = deepResearch,
+            hasLocalAction = local != null
+        )
+        activityStatus = VantaRouter.status(route)
 
         messages = messages + ChatMessage(true, text, attachments = currentAttachments)
         input = ""
         attachments = emptyList()
 
-        if (local != null) {
+        if (route == VantaRoute.ANDROID_ACTION && local != null) {
             addAssistant(local.reply)
             if (local.shouldOpenSettings) openSettings()
+            activityStatus = "Ready"
             activity.speak(local.reply)
             return
         }
@@ -300,7 +320,17 @@ private fun ChatScreen(
 
                 val imageDataUrls = withContext(Dispatchers.IO) {
                     currentAttachments.flatMap { attachmentToDataUrls(context, it) }
-                }.take(4)
+                }.take(8)
+                val attachmentContext = withContext(Dispatchers.IO) {
+                    currentAttachments.mapNotNull { attachmentContextText(context, it) }.joinToString("
+
+")
+                }
+                val requestText = if (attachmentContext.isBlank()) text
+                    else text + "
+
+ATTACHMENT CONTEXT:
+" + attachmentContext
 
                 val history = messages.dropLast(1).takeLast(10).map { SavedChatMessage(it.user, it.text) }
                 val instructions = VantaSmart.instructions(
@@ -311,35 +341,50 @@ private fun ChatScreen(
                 )
                 val api = VantaApi(store.loadApiKey(), store.loadModel())
 
-                if (research) {
-                    val reply = withContext(Dispatchers.IO) {
-                        api.ask(text, instructions, true, imageDataUrls, history)
+                when (route) {
+                    VantaRoute.DEEP_RESEARCH -> {
+                        val result = withContext(Dispatchers.IO) {
+                            VantaDeepResearch.run(api, requestText, instructions, history)
+                        }
+                        messages = messages + ChatMessage(false, result.text, sources = result.sources)
+                        persist()
+                        activity.speak(result.text)
                     }
-                    messages = messages + ChatMessage(false, reply.text, sources = reply.sources)
-                    persist()
-                    activity.speak(reply.text)
-                } else {
-                    var streamed = ""
-                    messages = messages + ChatMessage(false, "")
-                    val reply = withContext(Dispatchers.IO) {
-                        api.askStreaming(text, instructions, false, imageDataUrls, history) { delta ->
-                            streamed += delta
-                            activity.runOnUiThread {
-                                messages = messages.dropLast(1) + ChatMessage(false, streamed)
+                    VantaRoute.RESEARCH -> {
+                        val reply = withContext(Dispatchers.IO) {
+                            api.ask(requestText, instructions, true, imageDataUrls, history)
+                        }
+                        messages = messages + ChatMessage(false, reply.text, sources = reply.sources)
+                        persist()
+                        activity.speak(reply.text)
+                    }
+                    VantaRoute.ATTACHMENT_ANALYSIS, VantaRoute.CHAT -> {
+                        var streamed = ""
+                        messages = messages + ChatMessage(false, "")
+                        val reply = withContext(Dispatchers.IO) {
+                            api.askStreaming(requestText, instructions, false, imageDataUrls, history) { delta ->
+                                streamed += delta
+                                activity.runOnUiThread {
+                                    messages = messages.dropLast(1) + ChatMessage(false, streamed)
+                                }
                             }
                         }
+                        messages = messages.dropLast(1) + ChatMessage(false, reply.text)
+                        persist()
+                        activity.speak(reply.text)
                     }
-                    messages = messages.dropLast(1) + ChatMessage(false, reply.text)
-                    persist()
-                    activity.speak(reply.text)
+                    VantaRoute.ANDROID_ACTION -> Unit
                 }
+                deepResearch = false
             } catch (t: Throwable) {
                 val error = "VANTA error: " + (t.message ?: "Unknown error")
                 messages = messages + ChatMessage(false, error)
                 persist()
+                activityStatus = "Error"
                 activity.speak(error)
             } finally {
                 busy = false
+                activityStatus = "Ready"
             }
         }
     }
@@ -439,12 +484,15 @@ private fun ChatScreen(
                     }
                 }
             }
-            if (busy) item { Text("VANTA is working…", color = Color(0xFF8EB5DC), fontSize = 12.sp) }
+            if (busy) item { Text("VANTA • " + activityStatus + "…", color = Color(0xFF8EB5DC), fontSize = 12.sp) }
         }
 
         if (attachments.isNotEmpty()) {
-            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                attachments.take(4).forEachIndexed { index, attachment ->
+            Row(
+                modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                attachments.take(8).forEachIndexed { index, attachment ->
                     Surface(color = Color(0xFF102238), shape = RoundedCornerShape(12.dp)) {
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
@@ -469,10 +517,12 @@ private fun ChatScreen(
                 if (activity.cameraPermissionGranted()) cameraPicker.launch(null)
                 else activity.requestCameraPermission { cameraPicker.launch(null) }
             }) { Text("Camera") }
-            TextButton(onClick = { filePicker.launch(arrayOf("*/*")) }) { Text("File") }
-            TextButton(onClick = {
-                mode = VantaMode.FOCUS
-            }) { Text("Focus") }
+            TextButton(onClick = { filePicker.launch(arrayOf("*/*")) }) { Text("Files") }
+            TextButton(onClick = { mode = VantaMode.FOCUS }) { Text("Focus") }
+            AssistChip(
+                onClick = { deepResearch = !deepResearch },
+                label = { Text(if (deepResearch) "Deep ✓" else "Deep Research") }
+            )
         }
 
         Row(horizontalArrangement = Arrangement.spacedBy(7.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -483,7 +533,7 @@ private fun ChatScreen(
                 placeholder = { Text("Message VANTA") },
                 maxLines = 4
             )
-            FilledIconButton(onClick = { activity.listen { input = it } }, shape = CircleShape) {
+            FilledIconButton(onClick = { activity.listen { input = it; send() } }, shape = CircleShape) {
                 Text("🎙")
             }
             FilledIconButton(onClick = ::send, shape = CircleShape, enabled = !busy) {
@@ -662,8 +712,8 @@ private fun attachmentToDataUrls(context: Context, attachment: VantaAttachment):
         when {
             mime.startsWith("image/") ->
                 context.contentResolver.openInputStream(uri)?.use { BitmapFactory.decodeStream(it) }?.let { listOf(bitmapToDataUrl(it)) }.orEmpty()
-            mime == "application/pdf" ->
-                renderPdfFirstPage(context, uri)?.let { listOf(bitmapToDataUrl(it)) }.orEmpty()
+            mime == "application/pdf" || attachment.name.lowercase(Locale.getDefault()).endsWith(".pdf") ->
+                renderPdfPages(context, uri, 3).map { bitmapToDataUrl(it) }
             mime.startsWith("text/") -> {
                 val text = context.contentResolver.openInputStream(uri)?.bufferedReader()?.use { it.readText() } ?: ""
                 if (text.isBlank()) emptyList() else listOf(bitmapToDataUrl(textCard(text)))
@@ -672,6 +722,74 @@ private fun attachmentToDataUrls(context: Context, attachment: VantaAttachment):
         }
     }.getOrDefault(emptyList())
 }
+
+private fun attachmentContextText(context: Context, attachment: VantaAttachment): String? {
+    val uri = attachment.uri ?: return attachment.bitmap?.let { "Image attachment: " + attachment.name }
+    val mime = context.contentResolver.getType(uri).orEmpty()
+    return runCatching {
+        when {
+            VantaAttachmentInspector.isDocx(mime, attachment.name) -> {
+                val text = extractDocxText(context, uri)
+                "Document: " + attachment.name + "
+" + text.take(12000)
+            }
+            VantaAttachmentInspector.isTextLike(mime, attachment.name) -> {
+                val text = context.contentResolver.openInputStream(uri)?.bufferedReader()?.use { it.readText() }.orEmpty()
+                "Text file: " + attachment.name + "
+" + text.take(12000)
+            }
+            mime == "application/pdf" || attachment.name.lowercase(Locale.getDefault()).endsWith(".pdf") -> {
+                val pages = pdfPageCount(context, uri)
+                "PDF: " + attachment.name + " (" + (pages?.toString() ?: "unknown") + " pages). Page previews are attached for visual analysis."
+            }
+            mime.startsWith("image/") -> "Image attachment: " + attachment.name
+            else -> "Attachment: " + attachment.name + " (" + mime + ")"
+        }
+    }.getOrNull()
+}
+
+private fun extractDocxText(context: Context, uri: Uri): String {
+    val temp = java.io.File.createTempFile("vanta_docx_", ".docx", context.cacheDir)
+    context.contentResolver.openInputStream(uri)?.use { input ->
+        temp.outputStream().use { input.copyTo(it) }
+    }
+    return java.util.zip.ZipFile(temp).use { zip ->
+        val entry = zip.getEntry("word/document.xml") ?: return@use ""
+        zip.getInputStream(entry).bufferedReader().use { reader ->
+            reader.readText()
+                .replace(Regex("<w:tab\s*/>"), "	")
+                .replace(Regex("<w:br\s*/>"), "
+")
+                .replace(Regex("</w:p>"), "
+")
+                .replace(Regex("<[^>]+>"), " ")
+                .replace(Regex("\s+"), " ")
+                .trim()
+        }
+    }.also { temp.delete() }
+}
+
+private fun pdfPageCount(context: Context, uri: Uri): Int? = runCatching {
+    val descriptor = context.contentResolver.openFileDescriptor(uri, "r") ?: return@runCatching null
+    descriptor.use { PdfRenderer(it).use { renderer -> renderer.pageCount } }
+}.getOrNull()
+
+private fun renderPdfPages(context: Context, uri: Uri, maxPages: Int = 3): List<Bitmap> = runCatching {
+    val descriptor = context.contentResolver.openFileDescriptor(uri, "r") ?: return@runCatching emptyList()
+    descriptor.use { pfd ->
+        PdfRenderer(pfd).use { renderer ->
+            (0 until minOf(renderer.pageCount, maxPages)).mapNotNull { index ->
+                renderer.openPage(index).use { page ->
+                    val width = (page.width * 1.4f).toInt().coerceAtMost(1800)
+                    val height = (page.height.toFloat() / page.width * width).toInt().coerceAtMost(2400)
+                    Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888).also { bitmap ->
+                        page.render(bitmap, null, null, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)
+                    }
+                }
+            }
+        }
+    }
+}.getOrDefault(emptyList())
 
 private fun bitmapToDataUrl(bitmap: Bitmap): String {
     val maxSide = 1280
