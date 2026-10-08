@@ -1,6 +1,6 @@
 package com.vanta.app
 
-import android.app.AlarmClock
+import android.provider.AlarmClock
 import android.content.Context
 import android.content.Intent
 import java.text.SimpleDateFormat
