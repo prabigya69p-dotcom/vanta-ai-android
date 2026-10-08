@@ -234,7 +234,7 @@ private fun ChatScreen(
         if (uri != null) attachments = attachments + VantaAttachment(uri = uri, name = displayName(context, uri))
     }
     val cameraPicker = rememberLauncherForActivityResult(ActivityResultContracts.TakePicturePreview()) { bitmap ->
-        if (bitmap != null) attachments = attachments + VantaAttachment(bitmap = bitmap, name = "Camera") }
+        if (bitmap != null) attachments = attachments + VantaAttachment(bitmap = bitmap, name = "Camera")
     }
 
     LaunchedEffect(incomingImage.value) {
