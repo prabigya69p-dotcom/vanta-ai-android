@@ -71,47 +71,28 @@ object VantaDeepResearch {
         queries.forEachIndexed { index, query ->
             val reply = api.ask(
                 prompt = query,
-                instructions = instructions + "
-You are a research worker. Return concise findings, disagreements, dates, and useful source facts. This is research pass " + (index + 1) + " of " + queries.size + ".",
+                instructions = instructions + "\nYou are a research worker. Return concise findings, disagreements, dates, and useful source facts. Research pass " + (index + 1) + " of " + queries.size + ".",
                 research = true,
                 history = history.takeLast(6)
             )
-            evidence += "PASS " + (index + 1) + "
-" + reply.text.take(7000)
+            evidence += "PASS " + (index + 1) + "\n" + reply.text.take(7000)
             reply.sources.forEach { sources[it.url] = it }
         }
 
-        val synthesisPrompt = "Synthesize a careful answer to the user's question.
-
-" +
-            "USER QUESTION:
-" + prompt + "
-
-" +
-            "RESEARCH EVIDENCE:
-" + evidence.joinToString("
-
-") + "
-
-" +
-            "Requirements:
-" +
-            "- Answer the original question directly.
-" +
-            "- Separate confirmed facts from uncertain or conflicting claims.
-" +
-            "- Prefer recent information when relevant.
-" +
-            "- Do not invent citations or sources.
-" +
-            "- Mention important dates and caveats.
-" +
+        val synthesisPrompt = "Synthesize a careful answer to the user's question.\n\n" +
+            "USER QUESTION:\n" + prompt + "\n\n" +
+            "RESEARCH EVIDENCE:\n" + evidence.joinToString("\n\n") + "\n\n" +
+            "Requirements:\n" +
+            "- Answer the original question directly.\n" +
+            "- Separate confirmed facts from uncertain or conflicting claims.\n" +
+            "- Prefer recent information when relevant.\n" +
+            "- Do not invent citations or sources.\n" +
+            "- Mention important dates and caveats.\n" +
             "- Do not describe internal research passes."
 
         val synthesis = api.ask(
             prompt = synthesisPrompt,
-            instructions = instructions + "
-You are VANTA's final research synthesizer. Use only the supplied research evidence and be transparent about uncertainty.",
+            instructions = instructions + "\nYou are VANTA's final research synthesizer. Use only the supplied research evidence and be transparent about uncertainty.",
             research = false,
             history = history.takeLast(6)
         )

@@ -96,7 +96,7 @@ class WakeService : Service() {
                 return@launch
             }
             gateRecord = record
-            val bufferSize = minOf(record.bufferSize, 4096).coerceAtLeast(1024)
+            val bufferSize = minOf(AudioRecord.getMinBufferSize(16000, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT), 4096).coerceAtLeast(1024)
             val buffer = ShortArray(bufferSize)
             var noiseDb = -55.0
             var hotFrames = 0
