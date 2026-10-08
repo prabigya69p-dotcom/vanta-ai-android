@@ -16,11 +16,14 @@ class VantaStore(context: Context) {
     private val alias = "vanta_api_key_v2"
 
     private fun key(): javax.crypto.SecretKey {
-        val ks = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
+        var ks = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
         if (!ks.containsAlias(alias)) {
             val generator = KeyGenerator.getInstance("AES", "AndroidKeyStore")
             generator.init(256)
             generator.generateKey()
+            // Reload the keystore after generation so the new alias is visible
+            // on Android implementations that cache the loaded keystore.
+            ks = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
         }
         return (ks.getEntry(alias, null) as KeyStore.SecretKeyEntry).secretKey
     }
@@ -41,17 +44,26 @@ class VantaStore(context: Context) {
     }
 
     fun loadApiKey(): String {
-        val encoded = prefs.getString("api_v2", null) ?: return ""
-        return runCatching {
-            val bytes = Base64.decode(encoded, Base64.NO_WRAP)
-            val cipher = Cipher.getInstance("AES/GCM/NoPadding")
-            cipher.init(
-                Cipher.DECRYPT_MODE,
-                key(),
-                GCMParameterSpec(128, bytes.copyOfRange(0, 12))
-            )
-            String(cipher.doFinal(bytes.copyOfRange(12, bytes.size)), Charsets.UTF_8)
-        }.getOrDefault("")
+        val encoded = prefs.getString("api_v2", null)
+        if (!encoded.isNullOrBlank()) {
+            val decoded = runCatching {
+                val bytes = Base64.decode(encoded, Base64.NO_WRAP)
+                require(bytes.size > 12)
+                val cipher = Cipher.getInstance("AES/GCM/NoPadding")
+                cipher.init(
+                    Cipher.DECRYPT_MODE,
+                    key(),
+                    GCMParameterSpec(128, bytes.copyOfRange(0, 12))
+                )
+                String(cipher.doFinal(bytes.copyOfRange(12, bytes.size)), Charsets.UTF_8)
+            }.getOrNull()
+            if (!decoded.isNullOrBlank()) return decoded
+        }
+
+        // Recover keys saved by the pre-v2 store when possible.
+        val legacy = prefs.getString("api", null).orEmpty().trim()
+        if (legacy.isNotBlank()) return legacy
+        return ""
     }
 
     fun loadModel(): String =
