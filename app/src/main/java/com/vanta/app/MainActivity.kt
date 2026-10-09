@@ -24,6 +24,7 @@ import androidx.activity.compose.setContent
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -649,6 +650,7 @@ private fun SettingsScreen(
         Modifier
             .fillMaxSize()
             .background(Color(0xFF080F1A))
+            .verticalScroll(rememberScrollState())
             .padding(20.dp)
     ) {
         Text("VANTA Settings", fontSize = 25.sp, color = Color.White)
