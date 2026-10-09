@@ -1,10 +1,13 @@
 package com.vanta.app
 
 import android.content.Context
+import android.security.keystore.KeyGenParameterSpec
+import android.security.keystore.KeyProperties
 import android.util.Base64
 import java.security.KeyStore
 import javax.crypto.Cipher
 import javax.crypto.KeyGenerator
+import javax.crypto.SecretKey
 import javax.crypto.spec.GCMParameterSpec
 import org.json.JSONArray
 import org.json.JSONObject
@@ -15,24 +18,34 @@ class VantaStore(context: Context) {
     private val prefs = context.getSharedPreferences("vanta", Context.MODE_PRIVATE)
     private val alias = "vanta_api_key_v2"
 
-    private fun key(): javax.crypto.SecretKey {
+    private fun key(): SecretKey {
         var ks = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
         if (!ks.containsAlias(alias)) {
-            val generator = KeyGenerator.getInstance("AES", "AndroidKeyStore")
-            generator.init(256)
+            val generator = KeyGenerator.getInstance(
+                KeyProperties.KEY_ALGORITHM_AES,
+                "AndroidKeyStore"
+            )
+            generator.init(
+                KeyGenParameterSpec.Builder(
+                    alias,
+                    KeyProperties.PURPOSE_ENCRYPT or KeyProperties.PURPOSE_DECRYPT
+                )
+                    .setBlockModes(KeyProperties.BLOCK_MODE_GCM)
+                    .setEncryptionPaddings(KeyProperties.ENCRYPTION_PADDING_NONE)
+                    .setKeySize(256)
+                    .build()
+            )
             generator.generateKey()
-            // Reload the keystore after generation so the new alias is visible
-            // on Android implementations that cache the loaded keystore.
+            // Reload so the new alias is visible on implementations that cache the keystore.
             ks = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
         }
         return (ks.getEntry(alias, null) as KeyStore.SecretKeyEntry).secretKey
     }
 
-    fun saveApiKey(value: String): Boolean {
+    fun saveApiKey(value: String): Boolean = runCatching {
         val normalized = value.trim()
         if (normalized.isBlank()) {
-            prefs.edit().remove("api_v2").commit()
-            return true
+            return prefs.edit().remove("api_v2").commit()
         }
         val cipher = Cipher.getInstance("AES/GCM/NoPadding")
         cipher.init(Cipher.ENCRYPT_MODE, key())
@@ -40,8 +53,8 @@ class VantaStore(context: Context) {
         val saved = prefs.edit()
             .putString("api_v2", Base64.encodeToString(combined, Base64.NO_WRAP))
             .commit()
-        return saved && loadApiKey() == normalized
-    }
+        saved && loadApiKey() == normalized
+    }.getOrDefault(false)
 
     fun loadApiKey(): String {
         val encoded = prefs.getString("api_v2", null)
@@ -66,7 +79,7 @@ class VantaStore(context: Context) {
         return ""
     }
 
-    private fun saveEncrypted(prefKey: String, value: String): Boolean {
+    private fun saveEncrypted(prefKey: String, value: String): Boolean = runCatching {
         val normalized = value.trim()
         if (normalized.isBlank()) {
             return prefs.edit().remove(prefKey).commit()
@@ -77,8 +90,8 @@ class VantaStore(context: Context) {
         val saved = prefs.edit()
             .putString(prefKey, Base64.encodeToString(combined, Base64.NO_WRAP))
             .commit()
-        return saved && loadEncrypted(prefKey) == normalized
-    }
+        saved && loadEncrypted(prefKey) == normalized
+    }.getOrDefault(false)
 
     private fun loadEncrypted(prefKey: String): String {
         val encoded = prefs.getString(prefKey, null) ?: return ""
