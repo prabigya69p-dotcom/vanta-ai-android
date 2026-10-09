@@ -111,8 +111,16 @@ class VantaApi(
             }
         }
 
+        val streamedText = text.toString().trim()
+        if (streamedText.isBlank()) {
+            // Some model responses can complete the SSE stream without usable text deltas.
+            // Retry once without streaming instead of showing a false empty-response message.
+            connection.disconnect()
+            return ask(prompt, instructions, research, imageDataUrls, history)
+        }
+
         return VantaReply(
-            text = text.toString().ifBlank { "I received an empty streamed response." },
+            text = streamedText,
             usedResearch = research
         )
     }
