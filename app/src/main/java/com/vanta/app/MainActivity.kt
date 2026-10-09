@@ -121,19 +121,40 @@ class MainActivity : ComponentActivity() {
         tts?.setPitch(store.loadVoicePitch())
     }
 
+    private fun textForSpeech(text: String): String {
+        val cleaned = StringBuilder()
+        var index = 0
+        while (index < text.length) {
+            val codePoint = text.codePointAt(index)
+            val isEmojiOrPresentationMark =
+                codePoint in 0x1F000..0x1FAFF ||
+                codePoint in 0x2600..0x27BF ||
+                codePoint in 0x2300..0x23FF ||
+                codePoint in 0x1F1E6..0x1F1FF ||
+                codePoint in 0xE0020..0xE007F ||
+                codePoint in 0xFE00..0xFE0F ||
+                codePoint == 0x200D || codePoint == 0x20E3
+            if (!isEmojiOrPresentationMark) cleaned.appendCodePoint(codePoint)
+            index += Character.charCount(codePoint)
+        }
+        return cleaned.toString().replace(Regex("\\s+"), " ").trim()
+    }
+
     fun speak(text: String) {
+        val speechText = textForSpeech(text)
+        if (speechText.isBlank()) return
         stopListening()
         val elevenKey = store.loadElevenLabsApiKey()
         val elevenVoice = store.loadElevenLabsVoiceId()
         if (elevenKey.isNotBlank() && elevenVoice.isNotBlank()) {
             WakeService.pause(this)
             Thread {
-                val audio = ElevenLabsApi.synthesize(this, elevenKey, elevenVoice, text)
+                val audio = ElevenLabsApi.synthesize(this, elevenKey, elevenVoice, speechText)
                 runOnUiThread {
                     if (audio == null) {
                         WakeService.resume(this)
                         applyTtsSettings()
-                        tts?.speak(text, TextToSpeech.QUEUE_FLUSH, null, "vanta_reply")
+                        tts?.speak(speechText, TextToSpeech.QUEUE_FLUSH, null, "vanta_reply")
                     } else {
                         elevenPlayer?.release()
                         elevenPlayer = MediaPlayer().apply {
@@ -150,7 +171,7 @@ class MainActivity : ComponentActivity() {
                                 audio.delete()
                                 WakeService.resume(this@MainActivity)
                                 applyTtsSettings()
-                                tts?.speak(text, TextToSpeech.QUEUE_FLUSH, null, "vanta_reply_fallback")
+                                tts?.speak(speechText, TextToSpeech.QUEUE_FLUSH, null, "vanta_reply_fallback")
                                 true
                             }
                             prepare()
@@ -162,7 +183,7 @@ class MainActivity : ComponentActivity() {
             return
         }
         applyTtsSettings()
-        tts?.speak(text, TextToSpeech.QUEUE_FLUSH, null, "vanta_reply")
+        tts?.speak(speechText, TextToSpeech.QUEUE_FLUSH, null, "vanta_reply")
     }
 
     fun listen(onText: (String) -> Unit) {
