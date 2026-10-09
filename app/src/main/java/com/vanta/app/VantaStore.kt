@@ -120,13 +120,21 @@ class VantaStore(context: Context) {
     fun loadElevenLabsVoiceId(): String =
         loadEncrypted("elevenlabs_voice_v1")
 
-    fun loadModel(): String =
-        prefs.getString("model", "qwen/qwen3.5-122b-a10b") ?: "qwen/qwen3.5-122b-a10b"
+    fun loadModel(): String {
+        val saved = prefs.getString("model", DEFAULT_MODEL) ?: DEFAULT_MODEL
+        // The old Qwen model's free hosted endpoint is deprecated; migrate existing installs.
+        return if (saved.isBlank() || saved == RETIRED_FREE_MODEL) DEFAULT_MODEL else saved
+    }
 
     fun saveModel(value: String) {
-        prefs.edit()
-            .putString("model", value.trim().ifBlank { "qwen/qwen3.5-122b-a10b" })
-            .apply()
+        val requested = value.trim()
+        val model = if (requested.isBlank() || requested == RETIRED_FREE_MODEL) DEFAULT_MODEL else requested
+        prefs.edit().putString("model", model).apply()
+    }
+
+    private companion object {
+        const val DEFAULT_MODEL = "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning"
+        const val RETIRED_FREE_MODEL = "qwen/qwen3.5-122b-a10b"
     }
 
     fun loadPersonality(): String =
