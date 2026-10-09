@@ -8,6 +8,8 @@ import org.json.JSONObject
 
 object ElevenLabsApi {
     private const val BASE_URL = "https://api.elevenlabs.io/v1/text-to-speech/"
+    @Volatile var lastError: String = ""
+        private set
 
     fun synthesize(
         context: Context,
@@ -15,11 +17,15 @@ object ElevenLabsApi {
         voiceId: String,
         text: String
     ): File? {
+        lastError = ""
         val cleanKey = apiKey.trim()
         val cleanVoice = voiceId.trim()
-        if (cleanKey.isBlank() || cleanVoice.isBlank() || text.isBlank()) return null
+        if (cleanKey.isBlank() || cleanVoice.isBlank() || text.isBlank()) {
+            lastError = "ElevenLabs API key, voice ID, or text is empty."
+            return null
+        }
 
-        val connection = (URL(BASE_URL + cleanVoice).openConnection() as HttpURLConnection).apply {
+        val connection = (URL(BASE_URL + cleanVoice + "?output_format=mp3_44100_128").openConnection() as HttpURLConnection).apply {
             requestMethod = "POST"
             connectTimeout = 15000
             readTimeout = 30000
@@ -41,14 +47,22 @@ object ElevenLabsApi {
                 .toString()
 
             connection.outputStream.use { it.write(body.toByteArray(Charsets.UTF_8)) }
-            if (connection.responseCode !in 200..299) return null
+            if (connection.responseCode !in 200..299) {
+                val code = connection.responseCode
+                val details = runCatching { connection.errorStream?.bufferedReader()?.use { it.readText() } }.getOrNull().orEmpty()
+                lastError = "ElevenLabs HTTP $code" + if (details.isBlank()) "" else ": " + details.take(500)
+                android.util.Log.e("VANTA-ElevenLabs", lastError)
+                return null
+            }
 
             val file = File.createTempFile("vanta_voice_", ".mp3", context.cacheDir)
             connection.inputStream.use { input ->
                 file.outputStream().use { output -> input.copyTo(output) }
             }
             file
-        } catch (_: Exception) {
+        } catch (e: Exception) {
+            lastError = e.message ?: e.javaClass.simpleName
+            android.util.Log.e("VANTA-ElevenLabs", "Speech synthesis failed: $lastError", e)
             null
         } finally {
             connection.disconnect()

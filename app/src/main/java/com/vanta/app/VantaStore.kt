@@ -108,11 +108,11 @@ class VantaStore(context: Context) {
         loadEncrypted("elevenlabs_voice_v1")
 
     fun loadModel(): String =
-        prefs.getString("model", "qwen/qwen3.5-122b-a10b") ?: "qwen/qwen3.5-122b-a10b"
+        prefs.getString("model", null)?.trim()?.let { if (it.isBlank() || it == "qwen/qwen3.5-122b-a10b") "z-ai/glm-5.3-flash" else it } ?: "z-ai/glm-5.3-flash"
 
     fun saveModel(value: String) {
         prefs.edit()
-            .putString("model", value.trim().ifBlank { "qwen/qwen3.5-122b-a10b" })
+            .putString("model", value.trim().ifBlank { "z-ai/glm-5.3-flash" })
             .apply()
     }
 
