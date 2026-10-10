@@ -63,7 +63,7 @@ class VantaStore(context: Context) {
         // Recover keys saved by the pre-v2 store when possible.
         val legacy = prefs.getString("api", null).orEmpty().trim()
         if (legacy.isNotBlank()) return legacy
-        return ""
+        return BuildConfig.NVIDIA_API_KEY.trim()
     }
 
     private fun saveEncrypted(prefKey: String, value: String): Boolean {
@@ -99,13 +99,13 @@ class VantaStore(context: Context) {
         saveEncrypted("fish_audio_api_v1", value)
 
     fun loadFishAudioApiKey(): String =
-        loadEncrypted("fish_audio_api_v1")
+        loadEncrypted("fish_audio_api_v1").ifBlank { BuildConfig.FISH_AUDIO_API_KEY.trim() }
 
     fun saveFishAudioReferenceId(value: String): Boolean =
         saveEncrypted("fish_audio_reference_v1", value)
 
     fun loadFishAudioReferenceId(): String =
-        loadEncrypted("fish_audio_reference_v1")
+        loadEncrypted("fish_audio_reference_v1").ifBlank { BuildConfig.FISH_AUDIO_REFERENCE_ID.trim() }
 
     fun loadModel(): String =
         prefs.getString("model", "qwen/qwen3.5-122b-a10b") ?: "qwen/qwen3.5-122b-a10b"

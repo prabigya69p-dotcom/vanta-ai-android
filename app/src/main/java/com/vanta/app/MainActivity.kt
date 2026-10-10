@@ -40,7 +40,6 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
@@ -659,9 +658,6 @@ private fun SettingsScreen(
     memory: VantaMemoryStore,
     onBack: () -> Unit
 ) {
-    var key by remember { mutableStateOf(store.loadApiKey()) }
-    var fishKey by remember { mutableStateOf(store.loadFishAudioApiKey()) }
-    var fishReference by remember { mutableStateOf(store.loadFishAudioReferenceId()) }
     var model by remember { mutableStateOf(store.loadModel()) }
     var personality by remember { mutableStateOf(store.loadPersonality()) }
     var project by remember { mutableStateOf(store.loadProject()) }
@@ -681,26 +677,6 @@ private fun SettingsScreen(
     ) {
         Text("VANTA Settings", fontSize = 25.sp, color = Color.White)
         Spacer(Modifier.height(16.dp))
-
-        Text("NVIDIA NIM API key", color = Color(0xFF8EB5DC))
-        OutlinedTextField(
-            key, { key = it }, Modifier.fillMaxWidth(), singleLine = true,
-            visualTransformation = PasswordVisualTransformation(), placeholder = { Text("nvapi-…") }
-        )
-
-        Spacer(Modifier.height(12.dp))
-        Text("Fish Audio API key", color = Color(0xFF8EB5DC))
-        OutlinedTextField(
-            fishKey, { fishKey = it }, Modifier.fillMaxWidth(), singleLine = true,
-            visualTransformation = PasswordVisualTransformation(),
-            placeholder = { Text("Your Fish Audio API key") }
-        )
-        Spacer(Modifier.height(8.dp))
-        Text("Fish Audio reference voice ID (optional)", color = Color(0xFF8EB5DC))
-        OutlinedTextField(
-            fishReference, { fishReference = it }, Modifier.fillMaxWidth(), singleLine = true,
-            placeholder = { Text("Optional reference_id for your Fish Audio voice") }
-        )
 
         Spacer(Modifier.height(12.dp))
         Text("Model", color = Color(0xFF8EB5DC))
@@ -753,20 +729,13 @@ private fun SettingsScreen(
 
         Spacer(Modifier.height(18.dp))
         Button(onClick = {
-            saveStatus = if (store.saveApiKey(key) &&
-                store.saveFishAudioApiKey(fishKey) &&
-                store.saveFishAudioReferenceId(fishReference)
-            ) {
-                store.saveModel(model)
-                store.savePersonality(personality)
-                store.saveProject(project)
-                store.saveVoiceSpeed(speed)
-                store.saveVoicePitch(pitch)
-                store.saveTemporaryChat(temporary)
-                "Saved securely on this device ✓"
-            } else {
-                "Could not save the API key"
-            }
+            store.saveModel(model)
+            store.savePersonality(personality)
+            store.saveProject(project)
+            store.saveVoiceSpeed(speed)
+            store.saveVoicePitch(pitch)
+            store.saveTemporaryChat(temporary)
+            saveStatus = "Settings saved ✓"
         }) { Text("Save settings") }
 
         if (saveStatus.isNotBlank()) {
