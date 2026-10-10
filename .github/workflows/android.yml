@@ -32,10 +32,9 @@ jobs:
             -d "$(jq -n --arg model "$MODEL" '{
               model: $model,
               messages: [{role:"user", content:"Reply with only the word OK."}],
-              max_tokens: 128,
+              max_tokens: 256,
               stream: false,
-              reasoning_effort: "low",
-              clear_thinking: true
+              reasoning_effort: "low"
             }')")
 
           if [ "$CODE" != "200" ]; then
