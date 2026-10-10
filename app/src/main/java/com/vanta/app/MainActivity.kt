@@ -131,6 +131,12 @@ class MainActivity : ComponentActivity() {
                 val audio = ElevenLabsApi.synthesize(this, elevenKey, elevenVoice, text)
                 runOnUiThread {
                     if (audio == null) {
+                        val detail = ElevenLabsApi.lastError.take(160)
+                        android.widget.Toast.makeText(
+                            this,
+                            if (detail.isBlank()) "ElevenLabs voice failed. Using device voice." else "ElevenLabs failed: $detail. Using device voice.",
+                            android.widget.Toast.LENGTH_LONG
+                        ).show()
                         WakeService.resume(this)
                         applyTtsSettings()
                         tts?.speak(text, TextToSpeech.QUEUE_FLUSH, null, "vanta_reply")
@@ -674,6 +680,11 @@ private fun SettingsScreen(
         OutlinedTextField(
             elevenVoice, { elevenVoice = it }, Modifier.fillMaxWidth(), singleLine = true,
             placeholder = { Text("Your ElevenLabs voice ID") }
+        )
+        Text(
+            "A Voice ID is required along with the API key. If either is missing, VANTA uses device TTS.",
+            color = Color(0xFF8EB5DC),
+            fontSize = 12.sp
         )
 
         Spacer(Modifier.height(12.dp))
