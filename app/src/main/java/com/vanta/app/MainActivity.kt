@@ -123,38 +123,53 @@ class MainActivity : ComponentActivity() {
 
     fun speak(text: String) {
         stopListening()
+        // Keep the original Markdown in chat; only clean the separate voice copy.
+        val speechText = SpeechText.clean(text)
+        if (speechText.isBlank()) return
+
         val elevenKey = store.loadElevenLabsApiKey()
         val elevenVoice = store.loadElevenLabsVoiceId()
         if (elevenKey.isNotBlank() && elevenVoice.isNotBlank()) {
             WakeService.pause(this)
             Thread {
-                val audio = ElevenLabsApi.synthesize(this, elevenKey, elevenVoice, text)
+                val audio = ElevenLabsApi.synthesize(this, elevenKey, elevenVoice, speechText)
                 runOnUiThread {
                     if (audio == null) {
-                        WakeService.resume(this)
-                        applyTtsSettings()
-                        tts?.speak(text, TextToSpeech.QUEUE_FLUSH, null, "vanta_reply")
+                        speakWithAndroidTts(speechText, "vanta_reply")
                     } else {
-                        elevenPlayer?.release()
-                        elevenPlayer = MediaPlayer().apply {
-                            setDataSource(audio.absolutePath)
-                            setOnCompletionListener {
-                                release()
-                                elevenPlayer = null
+                        runCatching {
+                            elevenPlayer?.release()
+                            val player = MediaPlayer()
+                            elevenPlayer = player
+                            player.setDataSource(audio.absolutePath)
+                            player.setOnCompletionListener { completed ->
+                                completed.release()
+                                if (elevenPlayer === completed) elevenPlayer = null
                                 audio.delete()
                                 WakeService.resume(this@MainActivity)
                             }
-                            setOnErrorListener { player, _, _ ->
-                                player.release()
-                                elevenPlayer = null
+                            player.setOnErrorListener { failed, _, _ ->
+                                failed.release()
+                                if (elevenPlayer === failed) elevenPlayer = null
                                 audio.delete()
-                                WakeService.resume(this@MainActivity)
-                                applyTtsSettings()
-                                tts?.speak(text, TextToSpeech.QUEUE_FLUSH, null, "vanta_reply_fallback")
+                                speakWithAndroidTts(speechText, "vanta_reply_fallback")
                                 true
                             }
-                            prepare()
-                            start()
+                            player.setOnPreparedListener { ready ->
+                                runCatching { ready.start() }.onFailure {
+                                    ready.release()
+                                    if (elevenPlayer === ready) elevenPlayer = null
+                                    audio.delete()
+                                    speakWithAndroidTts(speechText, "vanta_reply_fallback")
+                                }
+                            }
+                            // Do not block the UI thread while the MP3 is prepared.
+                            player.prepareAsync()
+                        }.onFailure {
+                            elevenPlayer?.release()
+                            elevenPlayer = null
+                            audio.delete()
+                            speakWithAndroidTts(speechText, "vanta_reply_fallback")
                         }
                     }
                 }
@@ -162,7 +177,13 @@ class MainActivity : ComponentActivity() {
             return
         }
         applyTtsSettings()
-        tts?.speak(text, TextToSpeech.QUEUE_FLUSH, null, "vanta_reply")
+        tts?.speak(speechText, TextToSpeech.QUEUE_FLUSH, null, "vanta_reply")
+    }
+
+    private fun speakWithAndroidTts(text: String, utteranceId: String) {
+        WakeService.resume(this)
+        applyTtsSettings()
+        tts?.speak(text, TextToSpeech.QUEUE_FLUSH, null, utteranceId)
     }
 
     fun listen(onText: (String) -> Unit) {
