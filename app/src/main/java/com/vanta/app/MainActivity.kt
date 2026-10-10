@@ -76,8 +76,12 @@ class MainActivity : ComponentActivity() {
     private val incomingWakeQuery = mutableStateOf<String?>(null)
 
     private var pendingCameraAction: (() -> Unit)? = null
+    private var pendingListenCallback: ((String) -> Unit)? = null
+    private var elevenAudioFile: java.io.File? = null
     private val micPermission = registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
-        if (granted) startListeningInternal {}
+        val callback = pendingListenCallback
+        pendingListenCallback = null
+        if (granted && callback != null) startListeningInternal(callback)
     }
     private val cameraPermission = registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
         if (granted) pendingCameraAction?.invoke()
@@ -112,7 +116,14 @@ class MainActivity : ComponentActivity() {
             Intent.ACTION_SEND -> intent.getParcelableExtra<Uri>(Intent.EXTRA_STREAM)?.let { incomingImage.value = it }
             Intent.ACTION_VIEW -> intent.data?.takeIf { it.scheme == "content" }?.let { incomingImage.value = it }
         }
-        incomingWakeQuery.value = intent.getStringExtra("wake_query")?.takeIf { it.isNotBlank() }
+        val wakeQuery = intent.getStringExtra("wake_query")
+        incomingWakeQuery.value = when {
+            intent.getBooleanExtra("wake_listen", false) && wakeQuery.isNullOrBlank() -> WAKE_LISTEN_SENTINEL
+            !wakeQuery.isNullOrBlank() -> wakeQuery
+            else -> null
+        }
+        intent.removeExtra("wake_query")
+        intent.removeExtra("wake_listen")
     }
 
     private fun applyTtsSettings() {
@@ -137,6 +148,8 @@ class MainActivity : ComponentActivity() {
                     if (audio == null) {
                         speakWithAndroidTts(speechText, "vanta_reply")
                     } else {
+                        elevenAudioFile?.delete()
+                        elevenAudioFile = audio
                         runCatching {
                             elevenPlayer?.release()
                             val player = MediaPlayer()
@@ -146,12 +159,14 @@ class MainActivity : ComponentActivity() {
                                 completed.release()
                                 if (elevenPlayer === completed) elevenPlayer = null
                                 audio.delete()
+                                if (elevenAudioFile === audio) elevenAudioFile = null
                                 WakeService.resume(this@MainActivity)
                             }
                             player.setOnErrorListener { failed, _, _ ->
                                 failed.release()
                                 if (elevenPlayer === failed) elevenPlayer = null
                                 audio.delete()
+                                if (elevenAudioFile === audio) elevenAudioFile = null
                                 speakWithAndroidTts(speechText, "vanta_reply_fallback")
                                 true
                             }
@@ -160,6 +175,7 @@ class MainActivity : ComponentActivity() {
                                     ready.release()
                                     if (elevenPlayer === ready) elevenPlayer = null
                                     audio.delete()
+                                    if (elevenAudioFile === audio) elevenAudioFile = null
                                     speakWithAndroidTts(speechText, "vanta_reply_fallback")
                                 }
                             }
@@ -169,6 +185,7 @@ class MainActivity : ComponentActivity() {
                             elevenPlayer?.release()
                             elevenPlayer = null
                             audio.delete()
+                            if (elevenAudioFile === audio) elevenAudioFile = null
                             speakWithAndroidTts(speechText, "vanta_reply_fallback")
                         }
                     }
@@ -189,21 +206,39 @@ class MainActivity : ComponentActivity() {
     fun listen(onText: (String) -> Unit) {
         if (!SpeechRecognizer.isRecognitionAvailable(this)) return
         if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
+            pendingListenCallback = onText
             micPermission.launch(Manifest.permission.RECORD_AUDIO)
             return
         }
         stopSpeaking()
+        WakeService.pause(this)
         startListeningInternal(onText)
     }
 
+    fun handleHandsFreeShortcut(text: String): Boolean {
+        val command = text.trim().lowercase(Locale.getDefault()).replace(Regex("\\s+"), " ")
+        if (command in setOf("stop speaking", "stop talking", "stop voice", "stop audio", "be quiet", "quiet")) {
+            stopSpeaking()
+            WakeService.resume(this)
+            return true
+        }
+        return false
+    }
+
     private fun startListeningInternal(onText: (String) -> Unit) {
-        recognizer?.destroy()
+        stopListening()
         recognizer = SpeechRecognizer.createSpeechRecognizer(this).apply {
             setRecognitionListener(object : RecognitionListener {
                 override fun onResults(results: Bundle) {
-                    results.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)?.firstOrNull()?.let(onText)
+                    val spoken = results.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)?.firstOrNull()?.trim()
+                    releaseRecognizer()
+                    WakeService.resume(this@MainActivity)
+                    if (!spoken.isNullOrBlank()) onText(spoken)
                 }
-                override fun onError(error: Int) {}
+                override fun onError(error: Int) {
+                    releaseRecognizer()
+                    WakeService.resume(this@MainActivity)
+                }
                 override fun onReadyForSpeech(params: Bundle) {}
                 override fun onBeginningOfSpeech() {}
                 override fun onRmsChanged(rmsdB: Float) {}
@@ -220,12 +255,29 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    private fun stopListening() {
-        recognizer?.cancel()
+    private fun releaseRecognizer() {
+        val current = recognizer
+        recognizer = null
+        runCatching { current?.cancel() }
+        runCatching { current?.destroy() }
     }
+
+    private fun stopListening() = releaseRecognizer()
 
     fun stopSpeaking() {
         tts?.stop()
+        val player = elevenPlayer
+        elevenPlayer = null
+        runCatching {
+            player?.setOnCompletionListener(null)
+            player?.setOnErrorListener(null)
+            player?.setOnPreparedListener(null)
+            if (player?.isPlaying == true) player.stop()
+            player?.release()
+        }
+        elevenAudioFile?.delete()
+        elevenAudioFile = null
+        WakeService.resume(this)
     }
 
     fun cameraPermissionGranted(): Boolean =
@@ -241,11 +293,14 @@ class MainActivity : ComponentActivity() {
     }
 
     override fun onDestroy() {
-        recognizer?.destroy()
+        stopListening()
+        stopSpeaking()
         tts?.shutdown()
         super.onDestroy()
     }
 }
+
+private const val WAKE_LISTEN_SENTINEL = "__VANTA_WAKE_LISTEN__"
 
 @Composable
 private fun VantaApp(
@@ -315,13 +370,6 @@ private fun ChatScreen(
         incomingImage.value?.let {
             attachments = attachments + VantaAttachment(uri = it, name = "Shared image")
             incomingImage.value = null
-        }
-    }
-
-    LaunchedEffect(incomingWakeQuery.value) {
-        incomingWakeQuery.value?.let {
-            input = it
-            incomingWakeQuery.value = null
         }
     }
 
@@ -443,6 +491,22 @@ private fun ChatScreen(
                 busy = false
                 activityStatus = "Ready"
             }
+        }
+    }
+
+    LaunchedEffect(incomingWakeQuery.value) {
+        val wakeValue = incomingWakeQuery.value ?: return@LaunchedEffect
+        incomingWakeQuery.value = null
+        if (wakeValue == WAKE_LISTEN_SENTINEL) {
+            activity.listen { spoken ->
+                if (!activity.handleHandsFreeShortcut(spoken)) {
+                    input = spoken
+                    send()
+                }
+            }
+        } else if (!activity.handleHandsFreeShortcut(wakeValue)) {
+            input = wakeValue
+            send()
         }
     }
 
@@ -666,6 +730,14 @@ private fun SettingsScreen(
     var wake by remember { mutableStateOf(store.loadWakeEnabled()) }
     var saveStatus by remember { mutableStateOf("") }
     val context = LocalContext.current
+    val requestWakeMicPermission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+        if (granted && wake) {
+            WakeService.start(context)
+        } else if (!granted) {
+            wake = false
+            store.saveWakeEnabled(false)
+        }
+    }
 
     Column(
         Modifier
@@ -734,6 +806,8 @@ private fun SettingsScreen(
                     if (it) {
                         if (ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) {
                             WakeService.start(context)
+                        } else {
+                            requestWakeMicPermission.launch(Manifest.permission.RECORD_AUDIO)
                         }
                     } else {
                         WakeService.stop(context)

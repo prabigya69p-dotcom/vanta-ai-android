@@ -50,8 +50,8 @@ class WakeService : Service() {
         createChannel()
         val notification: Notification = NotificationCompat.Builder(this, "vanta_wake")
             .setSmallIcon(android.R.drawable.ic_btn_speak_now)
-            .setContentTitle("VANTA high-confidence hands-free")
-            .setContentText("Adaptive voice gate is active while enabled.")
+            .setContentTitle("VANTA hands-free is on")
+            .setContentText("Listening for the Hey VANTA wake phrase while enabled.")
             .setOngoing(true)
             .build()
         ServiceCompat.startForeground(
@@ -200,6 +200,7 @@ class WakeService : Service() {
                         Intent(this@WakeService, MainActivity::class.java)
                             .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP)
                             .putExtra("wake_query", query)
+                            .putExtra("wake_listen", query.isBlank())
                     )
                 }
                 finishWakeCycle()
@@ -310,7 +311,7 @@ class WakeService : Service() {
 data class WakeMatch(val query: String)
 
 object WakeMatcher {
-    private val leadWords = setOf("hey", "a")
+    private val leadWords = setOf("hey", "okay", "ok", "a")
     private val wakeWords = setOf("vanta", "venta", "venda", "vantah", "vanda")
 
     fun match(value: String): WakeMatch? {
