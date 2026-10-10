@@ -1,0 +1,4 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="argon_accessibility_description">Allows Argon to perform voice-requested navigation, scrolling, visible-label taps, and text entry into a focused non-password field. It does not submit entered text.</string>
+</resources>

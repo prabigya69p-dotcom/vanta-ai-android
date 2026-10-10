@@ -122,6 +122,9 @@ class MainActivity : ComponentActivity() {
         incomingWakeQuery.value = if (intent.hasExtra("wake_query")) intent.getStringExtra("wake_query").orEmpty() else null
     }
 
+    fun runAccessibilityVoiceCommand(command: String): String? =
+        ArgonAccessibilityService.executeVoiceCommand(this, command)
+
     private fun applyTtsSettings() {
         tts?.language = Locale.getDefault()
         tts?.setSpeechRate(store.loadVoiceSpeed())
@@ -438,6 +441,11 @@ private fun ChatScreen(
     LaunchedEffect(incomingWakeQuery.value) {
         val wakeQuery = incomingWakeQuery.value ?: return@LaunchedEffect
         incomingWakeQuery.value = null
+        activity.runAccessibilityVoiceCommand(wakeQuery)?.let { result ->
+            activityStatus = result
+            activity.speak(result)
+            return@LaunchedEffect
+        }
         if (wakeQuery.isBlank()) {
             activityStatus = "Listening for your command…"
             activity.listen { spoken ->
@@ -755,6 +763,14 @@ private fun SettingsScreen(
                 })
             }
         }) { Text("App permissions") }
+        TextButton(onClick = { ArgonAccessibilityService.openAccessibilitySettings(context) }) {
+            Text("Accessibility controls")
+        }
+        Text(
+            "Optional: enable Argon screen controls in Android Accessibility settings to use voice commands like ‘go back’, ‘scroll down’, ‘tap Settings’, or ‘type hello’. Text is entered only in a focused non-password field and is never submitted automatically. Avoid enabling accessibility for apps you do not trust.",
+            color = Color(0xFF6F8BA8),
+            fontSize = 11.sp
+        )
         TextButton(onClick = onBack) { Text("Back") }
     }
 }
