@@ -25,21 +25,41 @@ jobs:
           fi
 
           MODEL="${NVIDIA_MODEL:-z-ai/glm-5.3-flash}"
-          CODE=$(curl -sS -o /tmp/nim.json -w '%{http_code}' \
-            https://integrate.api.nvidia.com/v1/chat/completions \
-            -H "Authorization: Bearer $NVIDIA_API_KEY" \
-            -H 'Content-Type: application/json' \
-            -d "$(jq -n --arg model "$MODEL" '{
-              model: $model,
-              messages: [{role:"user", content:"Reply with only the word OK."}],
-              max_tokens: 256,
-              stream: false,
-              reasoning_effort: "low"
-            }')")
+          PAYLOAD=$(jq -n --arg model "$MODEL" '{
+            model: $model,
+            messages: [{role:"user", content:"Reply with only the word OK."}],
+            max_tokens: 256,
+            stream: false,
+            reasoning_effort: "low"
+          }')
+          CODE=000
+          for attempt in 1 2 3; do
+            echo "NVIDIA NIM request attempt $attempt/3..."
+            CODE=$(curl -sS --connect-timeout 20 --max-time 120 \
+              -o /tmp/nim.json -w '%{http_code}' \
+              https://integrate.api.nvidia.com/v1/chat/completions \
+              -H "Authorization: Bearer $NVIDIA_API_KEY" \
+              -H 'Content-Type: application/json' \
+              -d "$PAYLOAD" || true)
+            if [ "$CODE" = "200" ]; then
+              break
+            fi
+            if [[ "$CODE" =~ ^5[0-9][0-9]$ ]] && [ "$attempt" -lt 3 ]; then
+              echo "NVIDIA NIM gateway/server error HTTP $CODE; retrying in 10 seconds."
+              sleep 10
+              continue
+            fi
+            break
+          done
 
           if [ "$CODE" != "200" ]; then
-            echo "NVIDIA NIM returned HTTP $CODE."
+            echo "NVIDIA NIM returned HTTP $CODE after retry attempts."
             jq -c '{error, detail, message}' /tmp/nim.json 2>/dev/null | head -c 800 || true
+            if [ "$CODE" = "401" ] || [ "$CODE" = "403" ]; then
+              echo "This usually indicates an invalid key or missing model access."
+            elif [[ "$CODE" =~ ^5[0-9][0-9]$ ]] || [ "$CODE" = "000" ]; then
+              echo "This looks like a temporary NVIDIA service/network timeout, not proof that the API key is invalid."
+            fi
             exit 1
           fi
 
