@@ -18,6 +18,7 @@ import android.os.Bundle
 import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
+import android.os.PowerManager
 import android.speech.RecognitionListener
 import android.speech.RecognizerIntent
 import android.speech.SpeechRecognizer
@@ -44,6 +45,7 @@ class WakeService : Service() {
     private var listeningForWake = false
     private var paused = false
     private var lastTriggerAt = 0L
+    private var wakeLock: PowerManager.WakeLock? = null
 
     override fun onCreate() {
         super.onCreate()
@@ -60,6 +62,14 @@ class WakeService : Service() {
             notification,
             ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE
         )
+        val powerManager = getSystemService(Context.POWER_SERVICE) as PowerManager
+        wakeLock = powerManager.newWakeLock(
+            PowerManager.PARTIAL_WAKE_LOCK,
+            "$packageName:ArgonWakeListener"
+        ).apply {
+            setReferenceCounted(false)
+            acquire()
+        }
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -281,6 +291,10 @@ class WakeService : Service() {
         paused = true
         stopWakeCapture()
         scope.cancel()
+        wakeLock?.let { lock ->
+            if (lock.isHeld) lock.release()
+        }
+        wakeLock = null
         super.onDestroy()
     }
 
@@ -310,25 +324,20 @@ class WakeService : Service() {
 data class WakeMatch(val query: String)
 
 object WakeMatcher {
-    private val leadWords = setOf("hey")
     private val wakeWords = setOf("argon", "argan")
 
     fun match(value: String): WakeMatch? {
-        val normalized = value.lowercase(Locale.getDefault())
-            .map { ch ->
-                when {
-                    ch.isLetterOrDigit() -> ch
-                    ch.isWhitespace() -> ' '
-                    else -> ' '
-                }
-            }
+        val normalized = value.lowercase(Locale.ROOT)
+            .map { ch -> if (ch.isLetterOrDigit() || ch.isWhitespace()) ch else ' ' }
             .joinToString("")
-        val tokens = normalized.split(' ').filter { it.isNotBlank() }
-        for (i in 0 until tokens.size - 1) {
-            if (tokens[i] in leadWords && tokens[i + 1] in wakeWords) {
-                return WakeMatch(tokens.drop(i + 2).joinToString(" "))
-            }
-        }
-        return null
+            .trim()
+            .split(Regex("\\s+"))
+            .filter { it.isNotBlank() }
+
+        // Require the wake phrase at the beginning of the transcript. This avoids
+        // waking when an unrelated sentence merely contains the same two words.
+        if (normalized.size < 2) return null
+        if (normalized[0] != "hey" || normalized[1] !in wakeWords) return null
+        return WakeMatch(normalized.drop(2).joinToString(" "))
     }
 }
