@@ -2,6 +2,8 @@ package com.vanta.app
 
 import android.content.Context
 import android.util.Base64
+import android.security.keystore.KeyGenParameterSpec
+import android.security.keystore.KeyProperties
 import java.security.KeyStore
 import javax.crypto.Cipher
 import javax.crypto.KeyGenerator
@@ -18,8 +20,16 @@ class VantaStore(context: Context) {
     private fun key(): javax.crypto.SecretKey {
         var ks = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
         if (!ks.containsAlias(alias)) {
-            val generator = KeyGenerator.getInstance("AES", "AndroidKeyStore")
-            generator.init(256)
+            val generator = KeyGenerator.getInstance(KeyProperties.KEY_ALGORITHM_AES, "AndroidKeyStore")
+            val spec = KeyGenParameterSpec.Builder(
+                alias,
+                KeyProperties.PURPOSE_ENCRYPT or KeyProperties.PURPOSE_DECRYPT
+            )
+                .setBlockModes(KeyProperties.BLOCK_MODE_GCM)
+                .setEncryptionPaddings(KeyProperties.ENCRYPTION_PADDING_NONE)
+                .setKeySize(256)
+                .build()
+            generator.init(spec)
             generator.generateKey()
             // Reload the keystore after generation so the new alias is visible
             // on Android implementations that cache the loaded keystore.
@@ -29,7 +39,7 @@ class VantaStore(context: Context) {
     }
 
     fun saveApiKey(value: String): Boolean {
-        val normalized = value.trim()
+        val normalized = value.filterNot { it.isWhitespace() }
         if (normalized.isBlank()) {
             prefs.edit().remove("api_v2").commit()
             return true
@@ -55,19 +65,19 @@ class VantaStore(context: Context) {
                     key(),
                     GCMParameterSpec(128, bytes.copyOfRange(0, 12))
                 )
-                String(cipher.doFinal(bytes.copyOfRange(12, bytes.size)), Charsets.UTF_8)
+                String(cipher.doFinal(bytes.copyOfRange(12, bytes.size)), Charsets.UTF_8).filterNot { it.isWhitespace() }
             }.getOrNull()
-            if (!decoded.isNullOrBlank()) return decoded
+            if (!decoded.isNullOrBlank()) return decoded.filterNot { it.isWhitespace() }
         }
 
         // Recover keys saved by the pre-v2 store when possible.
         val legacy = prefs.getString("api", null).orEmpty().trim()
-        if (legacy.isNotBlank()) return legacy
+        if (legacy.isNotBlank()) return legacy.filterNot { it.isWhitespace() }
         return ""
     }
 
     private fun saveEncrypted(prefKey: String, value: String): Boolean {
-        val normalized = value.trim()
+        val normalized = value.filterNot { it.isWhitespace() }
         if (normalized.isBlank()) {
             return prefs.edit().remove(prefKey).commit()
         }
@@ -91,7 +101,7 @@ class VantaStore(context: Context) {
                 key(),
                 GCMParameterSpec(128, bytes.copyOfRange(0, 12))
             )
-            String(cipher.doFinal(bytes.copyOfRange(12, bytes.size)), Charsets.UTF_8)
+            String(cipher.doFinal(bytes.copyOfRange(12, bytes.size)), Charsets.UTF_8).filterNot { it.isWhitespace() }
         }.getOrDefault("")
     }
 
