@@ -68,6 +68,11 @@ jobs:
           git diff --stat
 
       - name: Run tests and build APK
+        env:
+          NVIDIA_API_KEY: ${{ secrets.NVIDIA_API_KEY }}
+          NVIDIA_MODEL: ${{ vars.NVIDIA_MODEL }}
+          FISH_API_KEY: ${{ secrets.FISH_API_KEY }}
+          FISH_VOICE_ID: ${{ vars.FISH_VOICE_ID }}
         run: gradle testDebugUnitTest assembleDebug --stacktrace
 
       - name: Upload Code Dev APK
