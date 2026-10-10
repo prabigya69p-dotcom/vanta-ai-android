@@ -107,12 +107,24 @@ class VantaStore(context: Context) {
     fun loadFishAudioReferenceId(): String =
         loadEncrypted("fish_audio_reference_v1").ifBlank { BuildConfig.FISH_AUDIO_REFERENCE_ID.trim() }
 
-    fun loadModel(): String =
-        prefs.getString("model", "qwen/qwen3.5-122b-a10b") ?: "qwen/qwen3.5-122b-a10b"
+    private fun defaultModel(): String =
+        BuildConfig.NVIDIA_MODEL.trim().ifBlank { "z-ai/glm-5.3-flash" }
+
+    fun loadModel(): String {
+        val saved = prefs.getString("model", null)?.trim().orEmpty()
+        // Migrate the previous hard-coded default to the model exercised by CI.
+        val resolved = if (saved.isBlank() || saved == "qwen/qwen3.5-122b-a10b") {
+            defaultModel()
+        } else {
+            saved
+        }
+        if (saved != resolved) prefs.edit().putString("model", resolved).apply()
+        return resolved
+    }
 
     fun saveModel(value: String) {
         prefs.edit()
-            .putString("model", value.trim().ifBlank { "qwen/qwen3.5-122b-a10b" })
+            .putString("model", value.trim().ifBlank { defaultModel() })
             .apply()
     }
 

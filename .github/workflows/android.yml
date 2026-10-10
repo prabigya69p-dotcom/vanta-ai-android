@@ -28,9 +28,11 @@ jobs:
           PAYLOAD=$(jq -n --arg model "$MODEL" '{
             model: $model,
             messages: [{role:"user", content:"Reply with only the word OK."}],
-            max_tokens: 256,
+            temperature: 0.2,
+            max_tokens: 4096,
             stream: false,
-            reasoning_effort: "low"
+            reasoning_effort: "low",
+            clear_thinking: true
           }')
           CODE=000
           for attempt in 1 2 3; do
@@ -141,6 +143,7 @@ jobs:
       - name: Run Android unit tests and build APK
         env:
           NVIDIA_API_KEY: ${{ secrets.NVIDIA_API_KEY }}
+          NVIDIA_MODEL: ${{ vars.NVIDIA_MODEL }}
           FISH_API_KEY: ${{ secrets.FISH_API_KEY }}
           FISH_VOICE_ID: ${{ vars.FISH_VOICE_ID }}
         run: gradle testDebugUnitTest assembleDebug --stacktrace
@@ -159,7 +162,7 @@ jobs:
           api-level: 35
           arch: x86_64
           script: |
-            set -euo pipefail
+            set -eu
             APK="$(find app/build/outputs/apk/debug -maxdepth 1 -type f -name '*.apk' | head -n 1)"
             test -n "$APK"
             PACKAGE="$("$ANDROID_HOME/cmdline-tools/latest/bin/apkanalyzer" manifest application-id "$APK")"

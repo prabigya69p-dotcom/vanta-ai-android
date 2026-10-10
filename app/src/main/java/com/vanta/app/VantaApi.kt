@@ -82,10 +82,7 @@ class VantaApi(
 
         if (code !in 200..299) {
             val raw = stream.bufferedReader().use { it.readText() }
-            val message = runCatching {
-                JSONObject(raw).optJSONObject("error")?.optString("message")
-            }.getOrNull()
-            error(message?.takeIf { it.isNotBlank() } ?: "NVIDIA NIM request failed ($code).")
+            error(formatNvidiaError(code, raw))
         }
 
         val reader = stream.bufferedReader()
@@ -142,6 +139,16 @@ class VantaApi(
             .put("max_tokens", 4096)
             .put("stream", stream)
 
+        // NVIDIA's GLM-5.3 models default to maximum reasoning, which can make
+        // an assistant request unnecessarily slow. Keep Vanta responsive and
+        // prevent the reasoning trace from replacing the user-facing answer.
+        if (model.equals("z-ai/glm-5.3-flash", ignoreCase = true) ||
+            model.equals("z-ai/glm-5.3", ignoreCase = true)
+        ) {
+            body.put("reasoning_effort", "low")
+                .put("clear_thinking", true)
+        }
+
         val messages = JSONArray()
 
         if (instructions.isNotBlank()) {
@@ -167,25 +174,52 @@ class VantaApi(
             )
         }
 
-        val content = JSONArray()
-            .put(JSONObject().put("type", "text").put("text", prompt))
-
-        imageDataUrls.take(8).forEach { data ->
-            content.put(
-                JSONObject()
-                    .put("type", "image_url")
-                    .put("image_url", JSONObject().put("url", data))
-            )
+        val userContent: Any = if (imageDataUrls.isEmpty()) {
+            // Use the standard text-only Chat Completions shape unless images exist.
+            prompt
+        } else {
+            JSONArray().put(JSONObject().put("type", "text").put("text", prompt)).also { content ->
+                imageDataUrls.take(8).forEach { data ->
+                    content.put(
+                        JSONObject()
+                            .put("type", "image_url")
+                            .put("image_url", JSONObject().put("url", data))
+                    )
+                }
+            }
         }
 
         messages.put(
             JSONObject()
                 .put("role", "user")
-                .put("content", content)
+                .put("content", userContent)
         )
 
         body.put("messages", messages)
         return body
+    }
+
+    private fun formatNvidiaError(code: Int, raw: String): String {
+        val detail = runCatching {
+            val json = JSONObject(raw)
+            val errorValue = json.opt("error")
+            val nested = when (errorValue) {
+                is JSONObject -> errorValue.optString("message").ifBlank { errorValue.optString("detail") }
+                is String -> errorValue
+                else -> ""
+            }
+            nested.ifBlank { json.optString("message").ifBlank { json.optString("detail") } }
+        }.getOrNull()?.takeIf { it.isNotBlank() }?.take(400)
+
+        val reason = when (code) {
+            401 -> "NVIDIA rejected the API key (HTTP 401). Verify the key used to build this APK."
+            403 -> "NVIDIA denied access to model $model (HTTP 403). Check model access for this key."
+            404 -> "NVIDIA could not find model $model (HTTP 404). Check the model ID."
+            429 -> "NVIDIA rate or quota limit reached (HTTP 429). Wait and retry."
+            500, 502, 503, 504 -> "NVIDIA NIM is temporarily unavailable (HTTP $code). Retry shortly."
+            else -> "NVIDIA NIM request failed (HTTP $code, model $model)."
+        }
+        return if (detail != null) "$reason Details: $detail" else reason
     }
 
     private fun readReply(
@@ -202,10 +236,7 @@ class VantaApi(
         val raw = stream.bufferedReader().use { it.readText() }
 
         if (code !in 200..299) {
-            val message = runCatching {
-                JSONObject(raw).optJSONObject("error")?.optString("message")
-            }.getOrNull()
-            error(message?.takeIf { it.isNotBlank() } ?: "NVIDIA NIM request failed ($code).")
+            error(formatNvidiaError(code, raw))
         }
 
         val json = JSONObject(raw)

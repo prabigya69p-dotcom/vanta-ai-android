@@ -13,9 +13,11 @@ android {
     defaultConfig {
         fun quotedBuildValue(value: String): String = "\"${value.replace("\\", "\\\\").replace("\"", "\\\"")}\""
         val nimApiKey = System.getenv("NVIDIA_API_KEY") ?: ""
+        val nimModel = System.getenv("NVIDIA_MODEL") ?: ""
         val fishApiKey = System.getenv("FISH_API_KEY") ?: ""
         val fishVoiceId = System.getenv("FISH_VOICE_ID") ?: ""
         buildConfigField("String", "NVIDIA_API_KEY", quotedBuildValue(nimApiKey))
+        buildConfigField("String", "NVIDIA_MODEL", quotedBuildValue(nimModel))
         buildConfigField("String", "FISH_AUDIO_API_KEY", quotedBuildValue(fishApiKey))
         buildConfigField("String", "FISH_AUDIO_REFERENCE_ID", quotedBuildValue(fishVoiceId))
         applicationId = "com.vanta.app"
