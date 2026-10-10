@@ -42,6 +42,7 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.core.content.ContextCompat
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -255,6 +256,7 @@ private fun VantaApp(
     incomingWakeQuery: MutableState<String?>
 ) {
     var settings by remember { mutableStateOf(false) }
+    var codeDevMode by remember { mutableStateOf(false) }
     MaterialTheme(
         colorScheme = darkColorScheme(
             background = Color(0xFF080F1A),
@@ -268,7 +270,7 @@ private fun VantaApp(
         if (settings) {
             SettingsScreen(store, memory) { settings = false }
         } else {
-            ChatScreen(store, memory, activity, incomingImage, incomingWakeQuery) { settings = true }
+            ChatScreen(store, memory, activity, incomingImage, incomingWakeQuery, codeDevMode, { codeDevMode = it }) { settings = true }
         }
     }
 }
@@ -280,6 +282,8 @@ private fun ChatScreen(
     activity: MainActivity,
     incomingImage: MutableState<Uri?>,
     incomingWakeQuery: MutableState<String?>,
+    codeDevMode: Boolean,
+    onCodeDevModeChanged: (Boolean) -> Unit,
     openSettings: () -> Unit
 ) {
     val scope = rememberCoroutineScope()
@@ -330,6 +334,42 @@ private fun ChatScreen(
         val prompt = input.trim()
         val currentAttachments = attachments
         if ((prompt.isEmpty() && currentAttachments.isEmpty()) || busy) return
+
+        if (codeDevMode) {
+            if (currentAttachments.isNotEmpty()) {
+                addAssistant("Code Dev Mode currently accepts text tasks only. Remove attachments and describe the code change.")
+                return
+            }
+            if (prompt.isBlank()) return
+            val githubToken = store.loadGitHubToken()
+            if (githubToken.isBlank()) {
+                addAssistant("Connect GitHub first in VANTA Settings → Code Dev Mode. Your token is stored encrypted on this device.")
+                openSettings()
+                return
+            }
+            messages = messages + ChatMessage(true, prompt)
+            input = ""
+            attachments = emptyList()
+            persist()
+            busy = true
+            activityStatus = "Submitting code task"
+            scope.launch {
+                try {
+                    withContext(Dispatchers.IO) { CodeDevClient.dispatch(githubToken, prompt) }
+                    val result = "Code Dev task submitted. GitHub Actions will generate the patch, run tests and build an APK. Validated changes are published as a separate pull request; they do not silently replace this installed app."
+                    addAssistant(result, sources = listOf(VantaSource("View Code Dev runs", "https://github.com/prabigya69p-dotcom/vanta-ai-android/actions")))
+                    activity.speak("Code Dev task submitted. I will build and test a separate code update.")
+                } catch (t: Throwable) {
+                    val message = "Code Dev could not start: " + (t.message ?: "GitHub request failed")
+                    addAssistant(message)
+                    activity.speak("Code Dev could not start. Check the GitHub connection in settings.")
+                } finally {
+                    busy = false
+                    activityStatus = "Ready"
+                }
+            }
+            return
+        }
 
         val text = prompt.ifEmpty { "Analyze these attachments." }
         val detectedMode = VantaSmart.modeFor(text, mode)
@@ -441,6 +481,18 @@ private fun ChatScreen(
     LaunchedEffect(incomingWakeQuery.value) {
         val wakeQuery = incomingWakeQuery.value ?: return@LaunchedEffect
         incomingWakeQuery.value = null
+        when (wakeQuery.trim().lowercase(Locale.ROOT)) {
+            "enter code dev mode", "start code dev mode", "code dev mode" -> {
+                onCodeDevModeChanged(true)
+                activity.speak("Code Dev Mode is on. Tell me the code change you want.")
+                return@LaunchedEffect
+            }
+            "exit code dev mode", "stop code dev mode", "normal mode" -> {
+                onCodeDevModeChanged(false)
+                activity.speak("Code Dev Mode is off.")
+                return@LaunchedEffect
+            }
+        }
         activity.runAccessibilityVoiceCommand(wakeQuery)?.let { result ->
             activityStatus = result
             activity.speak(result)
@@ -479,6 +531,14 @@ private fun ChatScreen(
         }
 
         Spacer(Modifier.height(8.dp))
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            AssistChip(
+                onClick = { onCodeDevModeChanged(!codeDevMode) },
+                label = { Text(if (codeDevMode) "Code Dev Mode ✓" else "Code Dev Mode") }
+            )
+            if (codeDevMode) Text("Changes are built on a separate branch", color = Color(0xFF8EB5DC), fontSize = 10.sp)
+        }
+        Spacer(Modifier.height(4.dp))
 
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text("Mode:", color = Color(0xFF8EB5DC), fontSize = 12.sp)
@@ -674,6 +734,7 @@ private fun SettingsScreen(
     var temporary by remember { mutableStateOf(store.loadTemporaryChat()) }
     var wake by remember { mutableStateOf(store.loadWakeEnabled()) }
     var saveStatus by remember { mutableStateOf("") }
+    var githubToken by remember { mutableStateOf("") }
     val context = LocalContext.current
 
     Column(
@@ -765,6 +826,37 @@ private fun SettingsScreen(
         }) { Text("App permissions") }
         TextButton(onClick = { ArgonAccessibilityService.openAccessibilitySettings(context) }) {
             Text("Accessibility controls")
+        }
+        Spacer(Modifier.height(18.dp))
+        Divider(color = Color(0xFF20364D))
+        Spacer(Modifier.height(12.dp))
+        Text("Code Dev Mode", color = Color(0xFF8EB5DC), fontSize = 18.sp)
+        Text(
+            "Let Argon request code changes from GitHub Actions. The workflow generates a patch, tests and builds it, then creates a separate pull request. It never silently installs or merges changes. Create a fine-grained token restricted to this repository with Actions: Read and write. The token is encrypted on this device and is not embedded in the APK.",
+            color = Color(0xFF6F8BA8), fontSize = 11.sp
+        )
+        OutlinedTextField(
+            value = githubToken,
+            onValueChange = { githubToken = it },
+            modifier = Modifier.fillMaxWidth(),
+            singleLine = true,
+            label = { Text("Fine-grained GitHub token") },
+            visualTransformation = PasswordVisualTransformation()
+        )
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+            TextButton(onClick = {
+                runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://github.com/settings/personal-access-tokens/new"))) }
+            }) { Text("Create token") }
+            Button(onClick = {
+                saveStatus = if (githubToken.isBlank()) {
+                    "Paste a repository-scoped GitHub token first."
+                } else if (runCatching { store.saveGitHubToken(githubToken) }.getOrDefault(false)) {
+                    githubToken = ""
+                    "GitHub connection saved securely on this device."
+                } else {
+                    "Could not save the GitHub token. Try again."
+                }
+            }) { Text("Save GitHub connection") }
         }
         Text(
             "Optional: enable Argon screen controls in Android Accessibility settings to use voice commands like ‘go back’, ‘scroll down’, ‘tap Settings’, or ‘type hello’. Text is entered only in a focused non-password field and is never submitted automatically. Avoid enabling accessibility for apps you do not trust.",

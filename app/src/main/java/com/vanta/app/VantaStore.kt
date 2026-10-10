@@ -95,6 +95,10 @@ class VantaStore(context: Context) {
         }.getOrDefault("")
     }
 
+    fun saveGitHubToken(value: String): Boolean = saveEncrypted("github_code_dev_token_v1", value)
+
+    fun loadGitHubToken(): String = loadEncrypted("github_code_dev_token_v1")
+
     fun saveFishAudioApiKey(value: String): Boolean =
         saveEncrypted("fish_audio_api_v1", value)
 
