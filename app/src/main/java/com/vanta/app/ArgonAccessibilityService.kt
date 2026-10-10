@@ -9,6 +9,7 @@ import android.speech.tts.TextToSpeech
 import android.text.TextUtils
 import android.view.accessibility.AccessibilityNodeInfo
 import java.util.Locale
+import android.widget.Toast
 
 /** User-enabled, opt-in voice navigation. It never auto-enables itself. */
 class ArgonAccessibilityService : AccessibilityService() {
@@ -27,8 +28,7 @@ class ArgonAccessibilityService : AccessibilityService() {
         if (engine != null) {
             engine.speak(message, TextToSpeech.QUEUE_FLUSH, null, "argon_accessibility_action")
         } else {
-            @Suppress("DEPRECATION")
-            announceForAccessibility(message)
+            Toast.makeText(this, message, Toast.LENGTH_SHORT).show()
         }
     }
 
