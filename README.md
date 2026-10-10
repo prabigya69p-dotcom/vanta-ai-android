@@ -14,7 +14,7 @@ VANTA is a clean, adaptive Android AI assistant built with Kotlin + Jetpack Comp
 - Web research with source links
 - Long-term local memory: “remember …”, “what do you remember”, “forget …”
 - Local actions: open common apps, timer, alarm, time, calculator, media-control request
-- Interruptible voice input and configurable TTS speed/pitch
+- Fish Audio text-to-speech with optional reference voice ID, plus Android system TTS fallback; configurable system TTS speed/pitch
 - Optional visible “Hey VANTA” foreground wake listener
 - Image generation through the current GPT Image model
 - Android share-in for images

@@ -71,7 +71,7 @@ class MainActivity : ComponentActivity() {
     private lateinit var memory: VantaMemoryStore
     private var recognizer: SpeechRecognizer? = null
     private var tts: TextToSpeech? = null
-    private var elevenPlayer: MediaPlayer? = null
+    private var fishPlayer: MediaPlayer? = null
     private val incomingImage = mutableStateOf<Uri?>(null)
     private val incomingWakeQuery = mutableStateOf<String?>(null)
 
@@ -123,30 +123,30 @@ class MainActivity : ComponentActivity() {
 
     fun speak(text: String) {
         stopListening()
-        val elevenKey = store.loadElevenLabsApiKey()
-        val elevenVoice = store.loadElevenLabsVoiceId()
-        if (elevenKey.isNotBlank() && elevenVoice.isNotBlank()) {
+        val fishKey = store.loadFishAudioApiKey()
+        val fishReference = store.loadFishAudioReferenceId()
+        if (fishKey.isNotBlank()) {
             WakeService.pause(this)
             Thread {
-                val audio = ElevenLabsApi.synthesize(this, elevenKey, elevenVoice, text)
+                val audio = FishAudioApi.synthesize(this, fishKey, fishReference, text)
                 runOnUiThread {
                     if (audio == null) {
                         WakeService.resume(this)
                         applyTtsSettings()
                         tts?.speak(text, TextToSpeech.QUEUE_FLUSH, null, "vanta_reply")
                     } else {
-                        elevenPlayer?.release()
-                        elevenPlayer = MediaPlayer().apply {
+                        fishPlayer?.release()
+                        fishPlayer = MediaPlayer().apply {
                             setDataSource(audio.absolutePath)
                             setOnCompletionListener {
                                 release()
-                                elevenPlayer = null
+                                fishPlayer = null
                                 audio.delete()
                                 WakeService.resume(this@MainActivity)
                             }
                             setOnErrorListener { player, _, _ ->
                                 player.release()
-                                elevenPlayer = null
+                                fishPlayer = null
                                 audio.delete()
                                 WakeService.resume(this@MainActivity)
                                 applyTtsSettings()
@@ -634,8 +634,8 @@ private fun SettingsScreen(
     onBack: () -> Unit
 ) {
     var key by remember { mutableStateOf(store.loadApiKey()) }
-    var elevenKey by remember { mutableStateOf(store.loadElevenLabsApiKey()) }
-    var elevenVoice by remember { mutableStateOf(store.loadElevenLabsVoiceId()) }
+    var fishKey by remember { mutableStateOf(store.loadFishAudioApiKey()) }
+    var fishReference by remember { mutableStateOf(store.loadFishAudioReferenceId()) }
     var model by remember { mutableStateOf(store.loadModel()) }
     var personality by remember { mutableStateOf(store.loadPersonality()) }
     var project by remember { mutableStateOf(store.loadProject()) }
@@ -663,17 +663,17 @@ private fun SettingsScreen(
         )
 
         Spacer(Modifier.height(12.dp))
-        Text("ElevenLabs API key", color = Color(0xFF8EB5DC))
+        Text("Fish Audio API key", color = Color(0xFF8EB5DC))
         OutlinedTextField(
-            elevenKey, { elevenKey = it }, Modifier.fillMaxWidth(), singleLine = true,
+            fishKey, { fishKey = it }, Modifier.fillMaxWidth(), singleLine = true,
             visualTransformation = PasswordVisualTransformation(),
-            placeholder = { Text("sk_…") }
+            placeholder = { Text("Your Fish Audio API key") }
         )
         Spacer(Modifier.height(8.dp))
-        Text("ElevenLabs Voice ID", color = Color(0xFF8EB5DC))
+        Text("Fish Audio reference voice ID (optional)", color = Color(0xFF8EB5DC))
         OutlinedTextField(
-            elevenVoice, { elevenVoice = it }, Modifier.fillMaxWidth(), singleLine = true,
-            placeholder = { Text("Your ElevenLabs voice ID") }
+            fishReference, { fishReference = it }, Modifier.fillMaxWidth(), singleLine = true,
+            placeholder = { Text("Optional reference_id for your Fish Audio voice") }
         )
 
         Spacer(Modifier.height(12.dp))
@@ -728,8 +728,8 @@ private fun SettingsScreen(
         Spacer(Modifier.height(18.dp))
         Button(onClick = {
             saveStatus = if (store.saveApiKey(key) &&
-                store.saveElevenLabsApiKey(elevenKey) &&
-                store.saveElevenLabsVoiceId(elevenVoice)
+                store.saveFishAudioApiKey(fishKey) &&
+                store.saveFishAudioReferenceId(fishReference)
             ) {
                 store.saveModel(model)
                 store.savePersonality(personality)

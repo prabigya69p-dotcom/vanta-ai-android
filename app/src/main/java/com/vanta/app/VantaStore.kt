@@ -95,17 +95,17 @@ class VantaStore(context: Context) {
         }.getOrDefault("")
     }
 
-    fun saveElevenLabsApiKey(value: String): Boolean =
-        saveEncrypted("elevenlabs_api_v1", value)
+    fun saveFishAudioApiKey(value: String): Boolean =
+        saveEncrypted("fish_audio_api_v1", value)
 
-    fun loadElevenLabsApiKey(): String =
-        loadEncrypted("elevenlabs_api_v1")
+    fun loadFishAudioApiKey(): String =
+        loadEncrypted("fish_audio_api_v1")
 
-    fun saveElevenLabsVoiceId(value: String): Boolean =
-        saveEncrypted("elevenlabs_voice_v1", value)
+    fun saveFishAudioReferenceId(value: String): Boolean =
+        saveEncrypted("fish_audio_reference_v1", value)
 
-    fun loadElevenLabsVoiceId(): String =
-        loadEncrypted("elevenlabs_voice_v1")
+    fun loadFishAudioReferenceId(): String =
+        loadEncrypted("fish_audio_reference_v1")
 
     fun loadModel(): String =
         prefs.getString("model", "qwen/qwen3.5-122b-a10b") ?: "qwen/qwen3.5-122b-a10b"

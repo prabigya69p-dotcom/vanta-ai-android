@@ -51,50 +51,39 @@ jobs:
 
           echo "NVIDIA NIM passed: $MODEL returned assistant text."
 
-  elevenlabs:
-    name: Test ElevenLabs auth and speech
+  fish-audio:
+    name: Test Fish Audio authentication and speech
     runs-on: ubuntu-latest
     steps:
-      - name: Check ElevenLabs authentication
+      - name: Generate sample speech
         env:
-          ELEVENLABS_API_KEY: ${{ secrets.ELEVENLABS_API_KEY }}
+          FISH_API_KEY: ${{ secrets.FISH_API_KEY }}
         run: |
           set -euo pipefail
-          if [ -z "${ELEVENLABS_API_KEY:-}" ]; then
-            echo "ELEVENLABS_API_KEY secret is missing."
+          if [ -z "${FISH_API_KEY:-}" ]; then
+            echo "FISH_API_KEY secret is missing. Add it in repository Actions secrets."
             exit 1
           fi
 
-          CODE=$(curl -sS -o /tmp/eleven-user.json -w '%{http_code}' \
-            https://api.elevenlabs.io/v1/user \
-            -H "xi-api-key: $ELEVENLABS_API_KEY")
-          if [ "$CODE" != "200" ]; then
-            echo "ElevenLabs authentication returned HTTP $CODE."
-            jq -c '{detail, message, error}' /tmp/eleven-user.json 2>/dev/null | head -c 800 || true
-            exit 1
-          fi
-          echo "ElevenLabs authentication passed."
-
-      - name: Test ElevenLabs speech generation
-        env:
-          ELEVENLABS_API_KEY: ${{ secrets.ELEVENLABS_API_KEY }}
-          ELEVENLABS_VOICE_ID: ${{ vars.ELEVENLABS_VOICE_ID }}
-        run: |
-          set -euo pipefail
-          VOICE="${ELEVENLABS_VOICE_ID:-21m00Tcm4TlvDq8ikWAM}"
-          CODE=$(curl -sS -o /tmp/eleven-speech.bin -w '%{http_code}' \
-            -X POST "https://api.elevenlabs.io/v1/text-to-speech/$VOICE" \
-            -H "xi-api-key: $ELEVENLABS_API_KEY" \
+          CODE=$(curl -sS -o /tmp/fish-response.bin -w '%{http_code}' \
+            -X POST https://api.fish.audio/v1/tts \
+            -H "Authorization: Bearer $FISH_API_KEY" \
             -H 'Content-Type: application/json' \
             -H 'Accept: audio/mpeg' \
-            -d '{"text":"Vanta voice test.","model_id":"eleven_multilingual_v2"}')
+            -H 'model: s2.1-pro-free' \
+            -d '{"text":"Vanta voice test.","format":"mp3"}')
 
-          if [ "$CODE" != "200" ] || [ ! -s /tmp/eleven-speech.bin ]; then
-            echo "ElevenLabs speech generation failed (HTTP $CODE). Check voice ID, permissions, model access, and quota."
-            jq -c '{detail, message, error}' /tmp/eleven-speech.bin 2>/dev/null | head -c 800 || true
+          if [ "$CODE" != "200" ] || [ ! -s /tmp/fish-response.bin ]; then
+            echo "Fish Audio speech generation failed (HTTP $CODE). Check the key, model access, and quota."
+            jq -c '{detail, message, error}' /tmp/fish-response.bin 2>/dev/null | head -c 800 || true
             exit 1
           fi
-          echo "ElevenLabs speech generation passed."
+
+          if ! file /tmp/fish-response.bin | grep -Eiq 'MPEG|ID3|audio'; then
+            echo "Fish Audio returned HTTP 200 but the response does not look like an audio file."
+            exit 1
+          fi
+          echo "Fish Audio generated an audio response successfully."
 
   android-tests:
     name: Build, install, and launch Vanta
