@@ -3,10 +3,12 @@ package com.vanta.app
 import android.provider.AlarmClock
 import android.content.Context
 import android.content.Intent
+import android.net.Uri
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 import java.util.TimeZone
+import java.net.URLEncoder
 import org.json.JSONArray
 
 enum class VantaMode(val label: String, val instruction: String) {
@@ -51,7 +53,7 @@ object VantaSmart {
     fun instructions(mode: VantaMode, personality: String, project: String, memories: List<String>): String {
         val memoryText = memories.joinToString("\n") { "- " + it }.ifBlank { "- No saved memories yet." }
         return (
-            "You are VANTA, a capable Android AI assistant.\n" +
+            "You are Argon, the AI assistant inside the Vanta Android app. The app is named Vanta; your assistant name is Argon.\n" +
             "Personality: " + personality.ifBlank { "direct, warm, futuristic, honest" } + ".\n" +
             "Active project/space: " + project.ifBlank { "General" } + ".\n" +
             "Mode: " + mode.label + ".\n" +
@@ -100,7 +102,7 @@ object VantaLocalCommandRouter {
         val lower = p.lowercase(Locale.getDefault())
 
         if (lower == "open settings" || lower == "open vanta settings") {
-            return LocalCommandResult("Opening VANTA settings.", shouldOpenSettings = true)
+            return LocalCommandResult("Opening Vanta settings.", shouldOpenSettings = true)
         }
 
         if (lower.startsWith("remember ")) {
@@ -124,7 +126,7 @@ object VantaLocalCommandRouter {
 
         if (lower == "clear memory" || lower == "forget everything") {
             memory.clear()
-            return LocalCommandResult("Cleared VANTA's saved memory.")
+            return LocalCommandResult("Cleared Argon's saved memory.")
         }
 
         val timer = Regex("""(?:set|start)?\s*(?:a\s*)?timer\s+(?:for\s+)?(\d+)\s*(seconds?|secs?|minutes?|mins?|hours?|hrs?)""", RegexOption.IGNORE_CASE).find(p)
@@ -140,7 +142,7 @@ object VantaLocalCommandRouter {
                 context.startActivity(
                     Intent(AlarmClock.ACTION_SET_TIMER)
                         .putExtra(AlarmClock.EXTRA_LENGTH, seconds)
-                        .putExtra(AlarmClock.EXTRA_MESSAGE, "VANTA timer")
+                        .putExtra(AlarmClock.EXTRA_MESSAGE, "Argon timer")
                         .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                 )
                 LocalCommandResult("Timer ready for " + amount + " " + timer.groupValues[2] + ".")
@@ -165,7 +167,7 @@ object VantaLocalCommandRouter {
                     Intent(AlarmClock.ACTION_SET_ALARM)
                         .putExtra(AlarmClock.EXTRA_HOUR, hour)
                         .putExtra(AlarmClock.EXTRA_MINUTES, minute)
-                        .putExtra(AlarmClock.EXTRA_MESSAGE, "VANTA alarm")
+                        .putExtra(AlarmClock.EXTRA_MESSAGE, "Argon alarm")
                         .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                 )
                 LocalCommandResult("Alarm setup opened for %02d:%02d.".format(hour, minute))
@@ -174,24 +176,66 @@ object VantaLocalCommandRouter {
             }
         }
 
-        val openTarget = Regex("""open\s+(.+)""", RegexOption.IGNORE_CASE).find(p)?.groupValues?.get(1)?.trim()
+        val searchQuery = Regex("""^(?:please\s+)?(?:search(?:\s+for)?|google)\s+(.+)$""", RegexOption.IGNORE_CASE)
+            .find(p)?.groupValues?.get(1)?.trim()
+        if (!searchQuery.isNullOrBlank()) {
+            return try {
+                val encoded = URLEncoder.encode(searchQuery, "UTF-8")
+                context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://www.google.com/search?q=" + encoded))
+                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+                LocalCommandResult("Searching the web for " + searchQuery + ".")
+            } catch (_: Throwable) {
+                LocalCommandResult("I couldn't open a browser for that search.")
+            }
+        }
+
+        val openTarget = Regex("""^(?:please\s+)?(?:open|launch|start)\s+(.+)$""", RegexOption.IGNORE_CASE)
+            .find(p)?.groupValues?.get(1)?.trim()
         if (openTarget != null) {
+            val target = openTarget.lowercase(Locale.getDefault()).removeSuffix(" app").trim()
             val aliases = mapOf(
-                "chrome" to "com.android.chrome",
-                "youtube" to "com.google.android.youtube",
-                "maps" to "com.google.android.apps.maps",
-                "calendar" to "com.google.android.calendar",
-                "camera" to "com.android.camera",
-                "settings" to "com.android.settings"
+                "chrome" to listOf("com.android.chrome"), "browser" to listOf("com.android.chrome", "com.sec.android.app.sbrowser"),
+                "google" to listOf("com.google.android.googlequicksearchbox", "com.android.chrome"),
+                "youtube" to listOf("com.google.android.youtube"), "maps" to listOf("com.google.android.apps.maps"),
+                "calendar" to listOf("com.google.android.calendar", "com.samsung.android.calendar"),
+                "camera" to listOf("com.android.camera", "com.sec.android.app.camera"),
+                "settings" to listOf("com.android.settings"), "gmail" to listOf("com.google.android.gm"),
+                "whatsapp" to listOf("com.whatsapp"), "instagram" to listOf("com.instagram.android"),
+                "facebook" to listOf("com.facebook.katana"), "tiktok" to listOf("com.zhiliaoapp.musically"),
+                "spotify" to listOf("com.spotify.music"), "roblox" to listOf("com.roblox.client"),
+                "play store" to listOf("com.android.vending"), "phone" to listOf("com.google.android.dialer", "com.samsung.android.dialer"),
+                "dialer" to listOf("com.google.android.dialer", "com.samsung.android.dialer"),
+                "messages" to listOf("com.google.android.apps.messaging", "com.samsung.android.messaging"),
+                "contacts" to listOf("com.google.android.contacts", "com.samsung.android.app.contacts"),
+                "clock" to listOf("com.google.android.deskclock", "com.sec.android.app.clockpackage"),
+                "calculator" to listOf("com.google.android.calculator", "com.sec.android.app.popupcalculator"),
+                "files" to listOf("com.google.android.documentsui", "com.sec.android.app.myfiles"),
+                "gallery" to listOf("com.sec.android.gallery3d", "com.google.android.apps.photos"),
+                "photos" to listOf("com.google.android.apps.photos"), "music" to listOf("com.spotify.music")
             )
-            val packageName = aliases[openTarget.lowercase(Locale.getDefault())]
-            if (packageName != null) {
-                val launch = context.packageManager.getLaunchIntentForPackage(packageName)
+            val packageManager = context.packageManager
+            val candidatePackages = aliases[target].orEmpty()
+            for (packageName in candidatePackages) {
+                val launch = packageManager.getLaunchIntentForPackage(packageName)
                 if (launch != null) {
                     context.startActivity(launch.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
                     return LocalCommandResult("Opening " + openTarget + ".")
                 }
             }
+            val installedMatch = runCatching {
+                packageManager.getInstalledApplications(0).firstOrNull { app ->
+                    packageManager.getApplicationLabel(app).toString().equals(target, ignoreCase = true) ||
+                        packageManager.getApplicationLabel(app).toString().contains(target, ignoreCase = true)
+                }
+            }.getOrNull()
+            if (installedMatch != null) {
+                val launch = packageManager.getLaunchIntentForPackage(installedMatch.packageName)
+                if (launch != null) {
+                    context.startActivity(launch.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+                    return LocalCommandResult("Opening " + packageManager.getApplicationLabel(installedMatch) + ".")
+                }
+            }
+            return LocalCommandResult("I couldn't find an installed app called " + openTarget + ".")
         }
 
         if (lower == "what time is it" || lower == "current time" || lower == "time") {

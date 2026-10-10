@@ -76,8 +76,16 @@ class MainActivity : ComponentActivity() {
     private val incomingWakeQuery = mutableStateOf<String?>(null)
 
     private var pendingCameraAction: (() -> Unit)? = null
+    private var pendingSpeechResult: ((String) -> Unit)? = null
     private val micPermission = registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
-        if (granted) startListeningInternal {}
+        val callback = pendingSpeechResult
+        pendingSpeechResult = null
+        if (granted && callback != null) {
+            WakeService.pause(this@MainActivity)
+            startListeningInternal(callback)
+        } else {
+            WakeService.resume(this@MainActivity)
+        }
     }
     private val cameraPermission = registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
         if (granted) pendingCameraAction?.invoke()
@@ -112,7 +120,7 @@ class MainActivity : ComponentActivity() {
             Intent.ACTION_SEND -> intent.getParcelableExtra<Uri>(Intent.EXTRA_STREAM)?.let { incomingImage.value = it }
             Intent.ACTION_VIEW -> intent.data?.takeIf { it.scheme == "content" }?.let { incomingImage.value = it }
         }
-        incomingWakeQuery.value = intent.getStringExtra("wake_query")?.takeIf { it.isNotBlank() }
+        incomingWakeQuery.value = if (intent.hasExtra("wake_query")) intent.getStringExtra("wake_query").orEmpty() else null
     }
 
     private fun applyTtsSettings() {
@@ -168,10 +176,12 @@ class MainActivity : ComponentActivity() {
     fun listen(onText: (String) -> Unit) {
         if (!SpeechRecognizer.isRecognitionAvailable(this)) return
         if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
+            pendingSpeechResult = onText
             micPermission.launch(Manifest.permission.RECORD_AUDIO)
             return
         }
         stopSpeaking()
+        WakeService.pause(this)
         startListeningInternal(onText)
     }
 
@@ -180,9 +190,17 @@ class MainActivity : ComponentActivity() {
         recognizer = SpeechRecognizer.createSpeechRecognizer(this).apply {
             setRecognitionListener(object : RecognitionListener {
                 override fun onResults(results: Bundle) {
-                    results.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)?.firstOrNull()?.let(onText)
+                    val spoken = results.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)?.firstOrNull()
+                    recognizer?.destroy()
+                    recognizer = null
+                    WakeService.resume(this@MainActivity)
+                    spoken?.let(onText)
                 }
-                override fun onError(error: Int) {}
+                override fun onError(error: Int) {
+                    recognizer?.destroy()
+                    recognizer = null
+                    WakeService.resume(this@MainActivity)
+                }
                 override fun onReadyForSpeech(params: Bundle) {}
                 override fun onBeginningOfSpeech() {}
                 override fun onRmsChanged(rmsdB: Float) {}
@@ -274,7 +292,7 @@ private fun ChatScreen(
     var messages by remember {
         mutableStateOf(
             store.loadChat().map { ChatMessage(it.user, it.text) }.ifEmpty {
-                listOf(ChatMessage(false, "Hey — I'm VANTA. What are we building?"))
+                listOf(ChatMessage(false, "Hey — I'm Argon, your AI inside Vanta. What can I do for you?"))
             }
         )
     }
@@ -294,13 +312,6 @@ private fun ChatScreen(
         incomingImage.value?.let {
             attachments = attachments + VantaAttachment(uri = it, name = "Shared image")
             incomingImage.value = null
-        }
-    }
-
-    LaunchedEffect(incomingWakeQuery.value) {
-        incomingWakeQuery.value?.let {
-            input = it
-            incomingWakeQuery.value = null
         }
     }
 
@@ -422,6 +433,21 @@ private fun ChatScreen(
                 busy = false
                 activityStatus = "Ready"
             }
+        }
+    }
+
+    LaunchedEffect(incomingWakeQuery.value) {
+        val wakeQuery = incomingWakeQuery.value ?: return@LaunchedEffect
+        incomingWakeQuery.value = null
+        if (wakeQuery.isBlank()) {
+            activityStatus = "Listening for your command…"
+            activity.listen { spoken ->
+                input = spoken.trim()
+                if (input.isNotBlank()) send()
+            }
+        } else {
+            input = wakeQuery.trim()
+            send()
         }
     }
 
@@ -566,7 +592,7 @@ private fun ChatScreen(
                 value = input,
                 onValueChange = { input = it },
                 modifier = Modifier.weight(1f),
-                placeholder = { Text("Message VANTA") },
+                placeholder = { Text("Message Argon") },
                 maxLines = 4
             )
             FilledIconButton(onClick = { activity.listen { input = it; send() } }, shape = CircleShape) {
@@ -702,8 +728,8 @@ private fun SettingsScreen(
 
         Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
             Column(Modifier.weight(1f)) {
-                Text("Hey VANTA hands-free", color = Color.White)
-                Text("Visible foreground listener; toggle on only when needed.", color = Color(0xFF6F8BA8), fontSize = 11.sp)
+                Text("Hey Argon hands-free", color = Color.White)
+                Text("Say “Hey Argon” followed by a command. Random sounds should not start a chat.", color = Color(0xFF6F8BA8), fontSize = 11.sp)
             }
             Switch(
                 checked = wake,

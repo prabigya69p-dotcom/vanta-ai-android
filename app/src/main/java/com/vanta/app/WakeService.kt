@@ -50,8 +50,8 @@ class WakeService : Service() {
         createChannel()
         val notification: Notification = NotificationCompat.Builder(this, "vanta_wake")
             .setSmallIcon(android.R.drawable.ic_btn_speak_now)
-            .setContentTitle("VANTA high-confidence hands-free")
-            .setContentText("Adaptive voice gate is active while enabled.")
+            .setContentTitle("Argon hands-free • Vanta")
+            .setContentText("Waiting only for the wake phrase: Hey Argon.")
             .setOngoing(true)
             .build()
         ServiceCompat.startForeground(
@@ -123,14 +123,14 @@ class WakeService : Service() {
                     }
 
                     noiseDb = noiseDb * 0.985 + db * 0.015
-                    val threshold = maxOf(-43.0, noiseDb + 11.0)
+                    val threshold = maxOf(-39.0, noiseDb + 14.0)
                     if (db > threshold) {
                         hotFrames++
                     } else {
                         hotFrames = maxOf(0, hotFrames - 2)
                     }
 
-                    if (hotFrames >= 5 && System.currentTimeMillis() - lastTriggerAt > 1800L) {
+                    if (hotFrames >= 8 && System.currentTimeMillis() - lastTriggerAt > 2200L) {
                         lastTriggerAt = System.currentTimeMillis()
                         listeningForWake = true
                         releaseGate(record)
@@ -310,8 +310,8 @@ class WakeService : Service() {
 data class WakeMatch(val query: String)
 
 object WakeMatcher {
-    private val leadWords = setOf("hey", "a")
-    private val wakeWords = setOf("vanta", "venta", "venda", "vantah", "vanda")
+    private val leadWords = setOf("hey")
+    private val wakeWords = setOf("argon", "argan")
 
     fun match(value: String): WakeMatch? {
         val normalized = value.lowercase(Locale.getDefault())
