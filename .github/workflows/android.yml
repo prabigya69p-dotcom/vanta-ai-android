@@ -162,7 +162,7 @@ jobs:
           arch: x86_64
           script: |
             set -eu
-            APK="$(find app/build/outputs/apk/debug -maxdepth 1 -type f -name '*.apk' | head -n 1)"
+            APK="$(find "${GITHUB_WORKSPACE:?GITHUB_WORKSPACE is not set}" -type f -path '*/build/outputs/apk/debug/*.apk' -print -quit)"
             test -n "$APK"
             PACKAGE="$("$ANDROID_HOME/cmdline-tools/latest/bin/apkanalyzer" manifest application-id "$APK")"
             adb install -r "$APK"
