@@ -223,12 +223,21 @@ class WakeService : Service() {
 
             setRecognitionListener(object : RecognitionListener {
                 override fun onResults(results: Bundle) {
-                    results.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION).orEmpty().forEach(::tryTrigger)
+                    val transcripts = results.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION).orEmpty()
+                    val confidence = results.getFloatArray(SpeechRecognizer.CONFIDENCE_SCORES)
+                    transcripts.forEachIndexed { index, transcript ->
+                        // Some recognition services provide confidence scores; ignore a weak match
+                        // instead of waking the app from an uncertain background transcription.
+                        val score = confidence?.getOrNull(index)
+                        if (score == null || score >= 0.65f) tryTrigger(transcript)
+                    }
                     if (!triggered) finishWakeCycle()
                 }
 
                 override fun onPartialResults(partialResults: Bundle) {
-                    partialResults.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION).orEmpty().forEach(::tryTrigger)
+                    // Deliberately do not wake from partial transcripts. Android often returns
+                    // "Hey Argon" before it has heard the rest of the command, causing early
+                    // launches and false activations. Wait for the completed transcript above.
                 }
 
                 override fun onError(error: Int) {
