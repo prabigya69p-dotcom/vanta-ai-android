@@ -31,8 +31,7 @@ jobs:
             temperature: 0.2,
             max_tokens: 4096,
             stream: false,
-            reasoning_effort: "low",
-            clear_thinking: true
+            reasoning_effort: "low"
           }')
           CODE=000
           for attempt in 1 2 3; do

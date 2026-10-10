@@ -146,7 +146,6 @@ class VantaApi(
             model.equals("z-ai/glm-5.3", ignoreCase = true)
         ) {
             body.put("reasoning_effort", "low")
-                .put("clear_thinking", true)
         }
 
         val messages = JSONArray()
