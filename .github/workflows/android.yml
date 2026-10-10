@@ -9,8 +9,8 @@ permissions:
   contents: read
 
 jobs:
-  api-tests:
-    name: Test NVIDIA NIM and ElevenLabs
+  nvidia-nim:
+    name: Test NVIDIA NIM / GLM
     runs-on: ubuntu-latest
     steps:
       - name: Check NVIDIA NIM API
@@ -19,26 +19,62 @@ jobs:
           NVIDIA_MODEL: ${{ vars.NVIDIA_MODEL }}
         run: |
           set -euo pipefail
-          if [ -z "$NVIDIA_API_KEY" ]; then echo 'NVIDIA_API_KEY secret is missing'; exit 1; fi
-          MODEL="${NVIDIA_MODEL:-z-ai/glm-5.3-flash}"
-          CODE=$(curl -sS -o /tmp/nim.json -w '%{http_code}' https://integrate.api.nvidia.com/v1/chat/completions \
-            -H "Authorization: Bearer $NVIDIA_API_KEY" -H 'Content-Type: application/json' \
-            -d "$(jq -n --arg model "$MODEL" '{model:$model,messages:[{role:"user",content:"Reply with OK"}],max_tokens:10}')")
-          if [ "$CODE" != 200 ] || ! jq -e '.choices[0].message.content | strings | length > 0' /tmp/nim.json >/dev/null; then
-            echo "NVIDIA NIM test failed (HTTP $CODE). Check the model name, key, account access, and endpoint."; jq -r '.detail // .message // empty' /tmp/nim.json | head -c 500; exit 1
+          if [ -z "${NVIDIA_API_KEY:-}" ]; then
+            echo "NVIDIA_API_KEY secret is missing."
+            exit 1
           fi
-          echo "NVIDIA NIM passed: model $MODEL returned a response."
 
+          MODEL="${NVIDIA_MODEL:-z-ai/glm-5.3-flash}"
+          CODE=$(curl -sS -o /tmp/nim.json -w '%{http_code}' \
+            https://integrate.api.nvidia.com/v1/chat/completions \
+            -H "Authorization: Bearer $NVIDIA_API_KEY" \
+            -H 'Content-Type: application/json' \
+            -d "$(jq -n --arg model "$MODEL" '{
+              model: $model,
+              messages: [{role:"user", content:"Reply with only the word OK."}],
+              max_tokens: 128,
+              stream: false,
+              reasoning_effort: "low",
+              clear_thinking: true
+            }')")
+
+          if [ "$CODE" != "200" ]; then
+            echo "NVIDIA NIM returned HTTP $CODE."
+            jq -c '{error, detail, message}' /tmp/nim.json 2>/dev/null | head -c 800 || true
+            exit 1
+          fi
+
+          if ! jq -e '(.choices[0].message.content // "") | strings | length > 0' /tmp/nim.json >/dev/null; then
+            echo "NVIDIA NIM returned HTTP 200 but no assistant text."
+            jq -c '{error, detail, message, choices: [(.choices // [])[] | {finish_reason, message: {content: .message.content, reasoning_content: .message.reasoning_content}}]}' /tmp/nim.json 2>/dev/null | head -c 1000 || true
+            exit 1
+          fi
+
+          echo "NVIDIA NIM passed: $MODEL returned assistant text."
+
+  elevenlabs:
+    name: Test ElevenLabs auth and speech
+    runs-on: ubuntu-latest
+    steps:
       - name: Check ElevenLabs authentication
         env:
           ELEVENLABS_API_KEY: ${{ secrets.ELEVENLABS_API_KEY }}
         run: |
           set -euo pipefail
-          if [ -z "$ELEVENLABS_API_KEY" ]; then echo 'ELEVENLABS_API_KEY secret is missing'; exit 1; fi
-          CODE=$(curl -sS -o /tmp/eleven.json -w '%{http_code}' https://api.elevenlabs.io/v1/user \
+          if [ -z "${ELEVENLABS_API_KEY:-}" ]; then
+            echo "ELEVENLABS_API_KEY secret is missing."
+            exit 1
+          fi
+
+          CODE=$(curl -sS -o /tmp/eleven-user.json -w '%{http_code}' \
+            https://api.elevenlabs.io/v1/user \
             -H "xi-api-key: $ELEVENLABS_API_KEY")
-          if [ "$CODE" != 200 ]; then echo "ElevenLabs authentication failed (HTTP $CODE). Check the key and account."; exit 1; fi
-          echo 'ElevenLabs authentication passed.'
+          if [ "$CODE" != "200" ]; then
+            echo "ElevenLabs authentication returned HTTP $CODE."
+            jq -c '{detail, message, error}' /tmp/eleven-user.json 2>/dev/null | head -c 800 || true
+            exit 1
+          fi
+          echo "ElevenLabs authentication passed."
 
       - name: Test ElevenLabs speech generation
         env:
@@ -47,38 +83,59 @@ jobs:
         run: |
           set -euo pipefail
           VOICE="${ELEVENLABS_VOICE_ID:-21m00Tcm4TlvDq8ikWAM}"
-          CODE=$(curl -sS -o /tmp/speech.mp3 -w '%{http_code}' \
+          CODE=$(curl -sS -o /tmp/eleven-speech.bin -w '%{http_code}' \
             -X POST "https://api.elevenlabs.io/v1/text-to-speech/$VOICE" \
-            -H "xi-api-key: $ELEVENLABS_API_KEY" -H 'Content-Type: application/json' \
+            -H "xi-api-key: $ELEVENLABS_API_KEY" \
+            -H 'Content-Type: application/json' \
+            -H 'Accept: audio/mpeg' \
             -d '{"text":"Vanta voice test.","model_id":"eleven_multilingual_v2"}')
-          if [ "$CODE" != 200 ] || [ ! -s /tmp/speech.mp3 ]; then echo "ElevenLabs speech test failed (HTTP $CODE). Check voice ID, model access, and quota."; exit 1; fi
-          echo 'ElevenLabs speech generation passed.'
+
+          if [ "$CODE" != "200" ] || [ ! -s /tmp/eleven-speech.bin ]; then
+            echo "ElevenLabs speech generation failed (HTTP $CODE). Check voice ID, permissions, model access, and quota."
+            jq -c '{detail, message, error}' /tmp/eleven-speech.bin 2>/dev/null | head -c 800 || true
+            exit 1
+          fi
+          echo "ElevenLabs speech generation passed."
 
   android-tests:
-    name: Build and launch Vanta on cloud Android
+    name: Build, install, and launch Vanta
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
-      - name: Set up Java
-        uses: actions/setup-java@v4
+        uses: actions/checkout@v5
+
+      - name: Set up Java 17
+        uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: '17'
-          cache: gradle
-      - name: Check Gradle wrapper
+
+      - name: Set up Gradle for this project (wrapper is not committed)
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '9.6.0'
+
+      - name: Install Android SDK platform required by the project
         run: |
-          test -f ./gradlew || { echo 'gradlew is missing from the repository root'; exit 1; }
-          chmod +x ./gradlew
+          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses >/dev/null
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "platforms;android-37" "build-tools;36.0.0"
+
+      - name: Verify Android project files
+        run: |
+          test -f settings.gradle.kts
+          test -f app/build.gradle.kts
+
       - name: Run Android unit tests and build APK
-        run: ./gradlew testDebugUnitTest assembleDebug --stacktrace
+        run: gradle testDebugUnitTest assembleDebug --stacktrace
+
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
           name: vanta-debug-apk
-          path: '**/build/outputs/apk/debug/*.apk'
+          path: app/build/outputs/apk/debug/*.apk
           if-no-files-found: error
           retention-days: 7
+
       - name: Boot emulator, install and launch APK
         uses: reactivecircus/android-emulator-runner@v2
         with:
@@ -86,11 +143,11 @@ jobs:
           arch: x86_64
           script: |
             set -euo pipefail
-            APK=$(find . -path '*/build/outputs/apk/debug/*.apk' -type f | head -n 1)
-            test -n "$APK" || { echo 'Debug APK not found'; exit 1; }
-            PACKAGE=$($ANDROID_HOME/cmdline-tools/latest/bin/apkanalyzer manifest application-id "$APK")
+            APK="$(find app/build/outputs/apk/debug -maxdepth 1 -type f -name '*.apk' | head -n 1)"
+            test -n "$APK"
+            PACKAGE="$("$ANDROID_HOME/cmdline-tools/latest/bin/apkanalyzer" manifest application-id "$APK")"
             adb install -r "$APK"
             adb shell monkey -p "$PACKAGE" -c android.intent.category.LAUNCHER 1
             sleep 5
-            adb shell pidof "$PACKAGE" || { echo 'App did not remain running after launch'; exit 1; }
-            echo 'Vanta installed and launched successfully on the emulator.'
+            adb shell pidof "$PACKAGE" || { echo "Vanta did not remain running after launch."; exit 1; }
+            echo "Vanta installed and remained running on the cloud emulator."
