@@ -1,30 +1,96 @@
-name: VANTA Android APK
+name: Vanta Full Test Suite
+
 on:
-  push:
-    branches: ["main"]
   workflow_dispatch:
+  push:
+    branches: [main]
+
 permissions:
   contents: read
+
 jobs:
-  build:
+  api-tests:
+    name: Test NVIDIA NIM and ElevenLabs
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout
+      - name: Check NVIDIA NIM API
+        env:
+          NVIDIA_API_KEY: ${{ secrets.NVIDIA_API_KEY }}
+          NVIDIA_MODEL: ${{ vars.NVIDIA_MODEL }}
+        run: |
+          set -euo pipefail
+          if [ -z "$NVIDIA_API_KEY" ]; then echo 'NVIDIA_API_KEY secret is missing'; exit 1; fi
+          MODEL="${NVIDIA_MODEL:-z-ai/glm-5.3-flash}"
+          CODE=$(curl -sS -o /tmp/nim.json -w '%{http_code}' https://integrate.api.nvidia.com/v1/chat/completions \
+            -H "Authorization: Bearer $NVIDIA_API_KEY" -H 'Content-Type: application/json' \
+            -d "$(jq -n --arg model "$MODEL" '{model:$model,messages:[{role:"user",content:"Reply with OK"}],max_tokens:10}')")
+          if [ "$CODE" != 200 ] || ! jq -e '.choices[0].message.content | strings | length > 0' /tmp/nim.json >/dev/null; then
+            echo "NVIDIA NIM test failed (HTTP $CODE). Check the model name, key, account access, and endpoint."; jq -r '.detail // .message // empty' /tmp/nim.json | head -c 500; exit 1
+          fi
+          echo "NVIDIA NIM passed: model $MODEL returned a response."
+
+      - name: Check ElevenLabs authentication
+        env:
+          ELEVENLABS_API_KEY: ${{ secrets.ELEVENLABS_API_KEY }}
+        run: |
+          set -euo pipefail
+          if [ -z "$ELEVENLABS_API_KEY" ]; then echo 'ELEVENLABS_API_KEY secret is missing'; exit 1; fi
+          CODE=$(curl -sS -o /tmp/eleven.json -w '%{http_code}' https://api.elevenlabs.io/v1/user \
+            -H "xi-api-key: $ELEVENLABS_API_KEY")
+          if [ "$CODE" != 200 ]; then echo "ElevenLabs authentication failed (HTTP $CODE). Check the key and account."; exit 1; fi
+          echo 'ElevenLabs authentication passed.'
+
+      - name: Test ElevenLabs speech generation
+        env:
+          ELEVENLABS_API_KEY: ${{ secrets.ELEVENLABS_API_KEY }}
+          ELEVENLABS_VOICE_ID: ${{ vars.ELEVENLABS_VOICE_ID }}
+        run: |
+          set -euo pipefail
+          VOICE="${ELEVENLABS_VOICE_ID:-21m00Tcm4TlvDq8ikWAM}"
+          CODE=$(curl -sS -o /tmp/speech.mp3 -w '%{http_code}' \
+            -X POST "https://api.elevenlabs.io/v1/text-to-speech/$VOICE" \
+            -H "xi-api-key: $ELEVENLABS_API_KEY" -H 'Content-Type: application/json' \
+            -d '{"text":"Vanta voice test.","model_id":"eleven_multilingual_v2"}')
+          if [ "$CODE" != 200 ] || [ ! -s /tmp/speech.mp3 ]; then echo "ElevenLabs speech test failed (HTTP $CODE). Check voice ID, model access, and quota."; exit 1; fi
+          echo 'ElevenLabs speech generation passed.'
+
+  android-tests:
+    name: Build and launch Vanta on cloud Android
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
         uses: actions/checkout@v4
       - name: Set up Java
         uses: actions/setup-java@v4
         with:
           distribution: temurin
-          java-version: "17"
-      - name: Set up Gradle
-        uses: gradle/actions/setup-gradle@v6
-        with:
-          gradle-version: "9.6.0"
-      - name: Build debug APK
-        run: gradle :app:assembleDebug
+          java-version: '17'
+          cache: gradle
+      - name: Check Gradle wrapper
+        run: |
+          test -f ./gradlew || { echo 'gradlew is missing from the repository root'; exit 1; }
+          chmod +x ./gradlew
+      - name: Run Android unit tests and build APK
+        run: ./gradlew testDebugUnitTest assembleDebug --stacktrace
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
           name: vanta-debug-apk
-          path: app/build/outputs/apk/debug/app-debug.apk
+          path: '**/build/outputs/apk/debug/*.apk'
           if-no-files-found: error
+          retention-days: 7
+      - name: Boot emulator, install and launch APK
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 35
+          arch: x86_64
+          script: |
+            set -euo pipefail
+            APK=$(find . -path '*/build/outputs/apk/debug/*.apk' -type f | head -n 1)
+            test -n "$APK" || { echo 'Debug APK not found'; exit 1; }
+            PACKAGE=$($ANDROID_HOME/cmdline-tools/latest/bin/apkanalyzer manifest application-id "$APK")
+            adb install -r "$APK"
+            adb shell monkey -p "$PACKAGE" -c android.intent.category.LAUNCHER 1
+            sleep 5
+            adb shell pidof "$PACKAGE" || { echo 'App did not remain running after launch'; exit 1; }
+            echo 'Vanta installed and launched successfully on the emulator.'
