@@ -156,17 +156,29 @@ jobs:
           retention-days: 7
 
       - name: Boot emulator, install and launch APK
+        timeout-minutes: 8
         uses: reactivecircus/android-emulator-runner@v2
         with:
-          api-level: 35
+          api-level: 33
+          target: google_apis
           arch: x86_64
+          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -no-snapshot -camera-back none -camera-front none
+          disable-animations: true
+          force-avd-creation: true
           script: |
             set -eu
+            echo "Searching for debug APK in $GITHUB_WORKSPACE"
             APK="$(find "${GITHUB_WORKSPACE:?GITHUB_WORKSPACE is not set}" -type f -path '*/build/outputs/apk/debug/*.apk' -print -quit)"
             test -n "$APK"
+            echo "Found APK: $APK"
             PACKAGE="$("$ANDROID_HOME/cmdline-tools/latest/bin/apkanalyzer" manifest application-id "$APK")"
-            adb install -r "$APK"
-            adb shell monkey -p "$PACKAGE" -c android.intent.category.LAUNCHER 1
+            adb devices
+            timeout 45s adb install -r "$APK"
+            timeout 30s adb shell monkey -p "$PACKAGE" -c android.intent.category.LAUNCHER 1
             sleep 5
-            adb shell pidof "$PACKAGE" || { echo "Vanta did not remain running after launch."; exit 1; }
+            if ! timeout 20s adb shell pidof "$PACKAGE"; then
+              echo "Vanta did not remain running after launch. Recent Android logs:"
+              adb logcat -d -t 300 || true
+              exit 1
+            fi
             echo "Vanta installed and remained running on the cloud emulator."
