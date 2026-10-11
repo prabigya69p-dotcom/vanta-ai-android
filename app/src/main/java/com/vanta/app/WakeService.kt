@@ -349,10 +349,14 @@ object WakeMatcher {
             .split(Regex("\\s+"))
             .filter { it.isNotBlank() }
 
-        // Require the wake phrase at the beginning of the transcript. This avoids
-        // waking when an unrelated sentence merely contains the same two words.
-        if (normalized.size < 2) return null
-        if (normalized[0] != "hey" || normalized[1] !in wakeWords) return null
-        return WakeMatch(normalized.drop(2).joinToString(" "))
+        // Wake only when the transcript STARTS with the wake word. Accept "Argon, ..."
+        // as well as the older "Hey Argon, ..." form. Never wake for an occurrence
+        // buried later in ordinary speech (for example, "I was talking about Argon").
+        val wakeIndex = when {
+            normalized.firstOrNull() in wakeWords -> 1
+            normalized.size >= 2 && normalized[0] == "hey" && normalized[1] in wakeWords -> 2
+            else -> return null
+        }
+        return WakeMatch(normalized.drop(wakeIndex).joinToString(" "))
     }
 }
