@@ -897,10 +897,6 @@ private fun SettingsScreen(
                         wakePermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
                     }
                 }
-                    } else {
-                        WakeService.stop(context)
-                    }
-                }
             )
         }
 
