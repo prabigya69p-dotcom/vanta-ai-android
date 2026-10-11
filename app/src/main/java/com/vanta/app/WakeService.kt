@@ -9,11 +9,6 @@ import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.content.pm.ServiceInfo
-import android.media.AudioFormat
-import android.media.AudioRecord
-import android.media.MediaRecorder
-import android.media.audiofx.AcousticEchoCanceler
-import android.media.audiofx.NoiseSuppressor
 import android.os.Bundle
 import android.os.Handler
 import android.os.IBinder
@@ -25,26 +20,16 @@ import android.speech.SpeechRecognizer
 import androidx.core.app.NotificationCompat
 import androidx.core.app.ServiceCompat
 import androidx.core.content.ContextCompat
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.cancel
-import kotlinx.coroutines.delay
-import kotlinx.coroutines.isActive
-import kotlinx.coroutines.launch
-import kotlin.math.log10
 import java.util.Locale
 
+/** Foreground wake listener. Keep one speech-recognition session armed and re-arm it after each result/error. */
 class WakeService : Service() {
-    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
-    private val mainHandler = Handler(Looper.getMainLooper())
+    private val handler = Handler(Looper.getMainLooper())
     private var recognizer: SpeechRecognizer? = null
-    private var gateRecord: AudioRecord? = null
-    private var gateJob: kotlinx.coroutines.Job? = null
     private var running = false
-    private var listeningForWake = false
     private var paused = false
-    private var lastTriggerAt = 0L
+    private var handlingWake = false
+    private var restartCount = 0
     private var wakeLock: PowerManager.WakeLock? = null
 
     override fun onCreate() {
@@ -53,20 +38,12 @@ class WakeService : Service() {
         val notification: Notification = NotificationCompat.Builder(this, "vanta_wake")
             .setSmallIcon(android.R.drawable.ic_btn_speak_now)
             .setContentTitle("Argon hands-free • Vanta")
-            .setContentText("Waiting only for the wake phrase: Hey Argon.")
+            .setContentText("Listening for “Hey Argon” only")
             .setOngoing(true)
             .build()
-        ServiceCompat.startForeground(
-            this,
-            11,
-            notification,
-            ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE
-        )
-        val powerManager = getSystemService(Context.POWER_SERVICE) as PowerManager
-        wakeLock = powerManager.newWakeLock(
-            PowerManager.PARTIAL_WAKE_LOCK,
-            "$packageName:ArgonWakeListener"
-        ).apply {
+        ServiceCompat.startForeground(this, 11, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE)
+        val pm = getSystemService(Context.POWER_SERVICE) as PowerManager
+        wakeLock = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "$packageName:ArgonWakeListener").apply {
             setReferenceCounted(false)
             acquire()
         }
@@ -77,238 +54,127 @@ class WakeService : Service() {
             stopSelf()
             return START_NOT_STICKY
         }
-
         if (intent?.getBooleanExtra("pause", false) == true) {
             paused = true
-            stopWakeCapture()
+            destroyRecognizer()
             return START_STICKY
         }
         if (intent?.getBooleanExtra("resume", false) == true) {
             paused = false
-            if (running) startNoiseGate()
+            if (running) scheduleListen(250)
             return START_STICKY
         }
-
         running = true
         paused = false
-        startNoiseGate()
+        handlingWake = false
+        scheduleListen(250)
         return START_STICKY
     }
 
-    private fun startNoiseGate() {
-        if (!running || paused || listeningForWake || gateJob?.isActive == true) return
-
-        gateJob = scope.launch(Dispatchers.Default) {
-            val record = createGateRecord() ?: run {
-                delay(1200)
-                gateJob = null
-                if (running && !paused) startNoiseGate()
-                return@launch
-            }
-            gateRecord = record
-            val bufferSize = minOf(AudioRecord.getMinBufferSize(16000, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT), 4096).coerceAtLeast(1024)
-            val buffer = ShortArray(bufferSize)
-            var noiseDb = -55.0
-            var hotFrames = 0
-            var calibratedFrames = 0
-
-            try {
-                record.startRecording()
-                while (isActive && running && !paused && !listeningForWake) {
-                    val read = record.read(buffer, 0, buffer.size, AudioRecord.READ_BLOCKING)
-                    if (read <= 0) continue
-
-                    var energy = 0.0
-                    for (i in 0 until read) {
-                        val v = buffer[i].toDouble() / 32768.0
-                        energy += v * v
-                    }
-                    val rms = kotlin.math.sqrt(energy / read.coerceAtLeast(1))
-                    val db = 20.0 * log10(rms.coerceAtLeast(1e-6))
-
-                    calibratedFrames++
-                    if (calibratedFrames < 35) {
-                        noiseDb = noiseDb * 0.80 + db * 0.20
-                        continue
-                    }
-
-                    noiseDb = noiseDb * 0.985 + db * 0.015
-                    val threshold = maxOf(-39.0, noiseDb + 14.0)
-                    if (db > threshold) {
-                        hotFrames++
-                    } else {
-                        hotFrames = maxOf(0, hotFrames - 2)
-                    }
-
-                    if (hotFrames >= 8 && System.currentTimeMillis() - lastTriggerAt > 2200L) {
-                        lastTriggerAt = System.currentTimeMillis()
-                        listeningForWake = true
-                        releaseGate(record)
-                        gateRecord = null
-                        mainHandler.post { listenForWake() }
-                        break
-                    }
-                }
-            } catch (_: Throwable) {
-                releaseGate(record)
-                gateRecord = null
-            } finally {
-                releaseGate(record)
-                if (gateRecord === record) gateRecord = null
-                gateJob = null
-            }
-        }
+    private fun scheduleListen(delayMs: Long) {
+        handler.removeCallbacks(rearmRunnable)
+        if (running && !paused && !handlingWake) handler.postDelayed(rearmRunnable, delayMs)
     }
 
-    private fun createGateRecord(): AudioRecord? = runCatching {
-        val sampleRate = 16000
-        val min = AudioRecord.getMinBufferSize(
-            sampleRate,
-            AudioFormat.CHANNEL_IN_MONO,
-            AudioFormat.ENCODING_PCM_16BIT
-        )
-        if (min <= 0) return@runCatching null
-
-        val record = AudioRecord.Builder()
-            .setAudioSource(MediaRecorder.AudioSource.VOICE_RECOGNITION)
-            .setAudioFormat(
-                AudioFormat.Builder()
-                    .setSampleRate(sampleRate)
-                    .setEncoding(AudioFormat.ENCODING_PCM_16BIT)
-                    .setChannelMask(AudioFormat.CHANNEL_IN_MONO)
-                    .build()
-            )
-            .setBufferSizeInBytes((min * 2).coerceAtLeast(4096))
-            .build()
-
-        if (AcousticEchoCanceler.isAvailable()) {
-            AcousticEchoCanceler.create(record.audioSessionId)?.enabled = true
-        }
-        if (NoiseSuppressor.isAvailable()) {
-            NoiseSuppressor.create(record.audioSessionId)?.enabled = true
-        }
-        record
-    }.getOrNull()
+    private val rearmRunnable = Runnable { listenForWake() }
 
     private fun listenForWake() {
-        if (!running || paused || !SpeechRecognizer.isRecognitionAvailable(this)) {
-            finishWakeCycle()
+        if (!running || paused || handlingWake) return
+        if (!SpeechRecognizer.isRecognitionAvailable(this)) {
+            handler.postDelayed(rearmRunnable, 2500)
             return
         }
+        destroyRecognizer()
+        try {
+            val current = SpeechRecognizer.createSpeechRecognizer(this)
+            recognizer = current
+            current.setRecognitionListener(object : RecognitionListener {
+                private var triggered = false
 
-        recognizer?.destroy()
-        recognizer = SpeechRecognizer.createSpeechRecognizer(this).apply {
-            var triggered = false
-
-            fun tryTrigger(raw: String) {
-                if (triggered) return
-                val match = WakeMatcher.match(raw) ?: return
-                triggered = true
-                val query = match.query
-                mainHandler.post {
-                    // Execute screen actions against the current app before Vanta is opened.
-                    // This preserves the actual target window for accessibility node lookup.
-                    if (query.isNotBlank() && ArgonAccessibilityService.handleWakeCommand(this@WakeService, query)) {
-                        finishWakeCycle()
-                        return@post
+                private fun inspect(texts: List<String>) {
+                    if (triggered || handlingWake || paused || !running) return
+                    val match = texts.asSequence().mapNotNull { WakeMatcher.match(it) }.firstOrNull() ?: return
+                    triggered = true
+                    handlingWake = true
+                    restartCount = 0
+                    destroyRecognizer()
+                    handler.post {
+                        val query = match.query
+                        if (query.isNotBlank() && ArgonAccessibilityService.handleWakeCommand(this@WakeService, query)) {
+                            handlingWake = false
+                            scheduleListen(900)
+                            return@post
+                        }
+                        try {
+                            startActivity(Intent(this@WakeService, MainActivity::class.java)
+                                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP)
+                                .putExtra("wake_query", query))
+                        } catch (_: Exception) {
+                            handlingWake = false
+                            scheduleListen(1200)
+                        }
                     }
-                    startActivity(
-                        Intent(this@WakeService, MainActivity::class.java)
-                            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP)
-                            .putExtra("wake_query", query)
-                    )
                 }
-                finishWakeCycle()
-            }
 
-            setRecognitionListener(object : RecognitionListener {
                 override fun onResults(results: Bundle) {
-                    val transcripts = results.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION).orEmpty()
-                    val confidence = results.getFloatArray(SpeechRecognizer.CONFIDENCE_SCORES)
-                    transcripts.forEachIndexed { index, transcript ->
-                        // Some recognition services provide confidence scores; ignore a weak match
-                        // instead of waking the app from an uncertain background transcription.
-                        val score = confidence?.getOrNull(index)
-                        if (score == null || score >= 0.65f) tryTrigger(transcript)
+                    val texts = results.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION).orEmpty()
+                    inspect(texts)
+                    if (!triggered) {
+                        restartCount = 0
+                        scheduleListen(250)
                     }
-                    if (!triggered) finishWakeCycle()
                 }
 
                 override fun onPartialResults(partialResults: Bundle) {
-                    // Deliberately do not wake from partial transcripts. Android often returns
-                    // "Hey Argon" before it has heard the rest of the command, causing early
-                    // launches and false activations. Wait for the completed transcript above.
+                    // Only act on a complete result; partials frequently contain false wake-word guesses.
                 }
 
                 override fun onError(error: Int) {
-                    finishWakeCycle()
+                    if (!triggered && !handlingWake) {
+                        restartCount = (restartCount + 1).coerceAtMost(6)
+                        scheduleListen((350L * restartCount).coerceAtMost(2200L))
+                    }
                 }
-
-                override fun onReadyForSpeech(params: Bundle) {}
+                override fun onReadyForSpeech(params: Bundle) { restartCount = 0 }
                 override fun onBeginningOfSpeech() {}
                 override fun onRmsChanged(rmsdB: Float) {}
                 override fun onBufferReceived(buffer: ByteArray) {}
                 override fun onEndOfSpeech() {}
                 override fun onEvent(eventType: Int, params: Bundle) {}
             })
-
-            startListening(Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
+            current.startListening(Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
                 putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
-                putExtra(RecognizerIntent.EXTRA_LANGUAGE, Locale.getDefault())
+                putExtra(RecognizerIntent.EXTRA_LANGUAGE, Locale.US.toLanguageTag())
                 putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
                 putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 5)
-                putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS, 850L)
-                putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLIS, 650L)
+                putExtra(RecognizerIntent.EXTRA_PREFER_OFFLINE, false)
+                putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS, 1200L)
+                putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLIS, 800L)
             })
+        } catch (_: Exception) {
+            restartCount = (restartCount + 1).coerceAtMost(6)
+            scheduleListen((500L * restartCount).coerceAtMost(3000L))
         }
     }
 
-    private fun finishWakeCycle() {
-        mainHandler.post {
-            recognizer?.destroy()
-            recognizer = null
-            listeningForWake = false
-            if (running && !paused) {
-                scope.launch {
-                    delay(120)
-                    startNoiseGate()
-                }
-            }
-        }
-    }
-
-    private fun stopWakeCapture() {
-        mainHandler.post {
-            recognizer?.destroy()
-            recognizer = null
-            listeningForWake = false
-        }
-        releaseGate(gateRecord)
-        gateRecord = null
-        gateJob?.cancel()
-        gateJob = null
-    }
-
-    private fun releaseGate(record: AudioRecord?) {
-        runCatching { record?.stop() }
-        runCatching { record?.release() }
+    private fun destroyRecognizer() {
+        val old = recognizer
+        recognizer = null
+        try { old?.cancel() } catch (_: Exception) {}
+        try { old?.destroy() } catch (_: Exception) {}
     }
 
     private fun createChannel() {
         val manager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-        manager.createNotificationChannel(
-            NotificationChannel("vanta_wake", "VANTA hands-free", NotificationManager.IMPORTANCE_LOW)
-        )
+        manager.createNotificationChannel(NotificationChannel("vanta_wake", "VANTA hands-free", NotificationManager.IMPORTANCE_LOW))
     }
 
     override fun onDestroy() {
         running = false
         paused = true
-        stopWakeCapture()
-        scope.cancel()
-        wakeLock?.let { lock ->
-            if (lock.isHeld) lock.release()
-        }
+        handler.removeCallbacksAndMessages(null)
+        destroyRecognizer()
+        wakeLock?.let { if (it.isHeld) it.release() }
         wakeLock = null
         super.onDestroy()
     }
@@ -316,22 +182,13 @@ class WakeService : Service() {
     override fun onBind(intent: Intent?): IBinder? = null
 
     companion object {
-        fun start(context: Context) {
-            ContextCompat.startForegroundService(context, Intent(context, WakeService::class.java))
-        }
-
-        fun stop(context: Context) {
-            context.stopService(Intent(context, WakeService::class.java))
-        }
-
+        fun start(context: Context) = ContextCompat.startForegroundService(context, Intent(context, WakeService::class.java))
+        fun stop(context: Context) = context.stopService(Intent(context, WakeService::class.java))
         fun pause(context: Context) {
-            if (!VantaStore(context).loadWakeEnabled()) return
-            context.startService(Intent(context, WakeService::class.java).putExtra("pause", true))
+            if (VantaStore(context).loadWakeEnabled()) context.startService(Intent(context, WakeService::class.java).putExtra("pause", true))
         }
-
         fun resume(context: Context) {
-            if (!VantaStore(context).loadWakeEnabled()) return
-            context.startService(Intent(context, WakeService::class.java).putExtra("resume", true))
+            if (VantaStore(context).loadWakeEnabled()) context.startService(Intent(context, WakeService::class.java).putExtra("resume", true))
         }
     }
 }
@@ -340,18 +197,10 @@ data class WakeMatch(val query: String)
 
 object WakeMatcher {
     private val wakeWords = setOf("argon", "argan")
-
     fun match(value: String): WakeMatch? {
         val normalized = value.lowercase(Locale.ROOT)
             .map { ch -> if (ch.isLetterOrDigit() || ch.isWhitespace()) ch else ' ' }
-            .joinToString("")
-            .trim()
-            .split(Regex("\\s+"))
-            .filter { it.isNotBlank() }
-
-        // Wake only when the transcript STARTS with the wake word. Accept "Argon, ..."
-        // as well as the older "Hey Argon, ..." form. Never wake for an occurrence
-        // buried later in ordinary speech (for example, "I was talking about Argon").
+            .joinToString("").trim().split(Regex("\\s+")).filter { it.isNotBlank() }
         val wakeIndex = when {
             normalized.firstOrNull() in wakeWords -> 1
             normalized.size >= 2 && normalized[0] == "hey" && normalized[1] in wakeWords -> 2
