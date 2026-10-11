@@ -29,6 +29,7 @@ class WakeService : Service() {
     private var running = false
     private var paused = false
     private var handlingWake = false
+    private var awaitingCommand = false
     private var restartCount = 0
     private var wakeLock: PowerManager.WakeLock? = null
 
@@ -67,6 +68,7 @@ class WakeService : Service() {
         running = true
         paused = false
         handlingWake = false
+        awaitingCommand = false
         scheduleListen(250)
         return START_STICKY
     }
@@ -93,6 +95,16 @@ class WakeService : Service() {
 
                 private fun inspect(texts: List<String>) {
                     if (triggered || handlingWake || paused || !running) return
+                    if (awaitingCommand) {
+                        val command=texts.asSequence().map{it.trim()}.firstOrNull{it.isNotBlank()}?:return
+                        triggered=true;awaitingCommand=false;handlingWake=true;restartCount=0;destroyRecognizer()
+                        handler.post {
+                            if(ArgonAccessibilityService.handleWakeCommand(this@WakeService,command)){handlingWake=false;scheduleListen(900);return@post}
+                            try{startActivity(Intent(this@WakeService,MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP).putExtra("wake_query",command))}catch(_:Exception){}
+                            handlingWake=false;scheduleListen(1200)
+                        }
+                        return
+                    }
                     val match = texts.asSequence().mapNotNull { WakeMatcher.match(it) }.firstOrNull() ?: return
                     triggered = true
                     handlingWake = true
@@ -100,6 +112,7 @@ class WakeService : Service() {
                     destroyRecognizer()
                     handler.post {
                         val query = match.query
+                        if (query.isBlank()) { awaitingCommand = true; handlingWake = false; scheduleListen(350); return@post }
                         if (query.isNotBlank() && ArgonAccessibilityService.handleWakeCommand(this@WakeService, query)) {
                             handlingWake = false
                             scheduleListen(900)
