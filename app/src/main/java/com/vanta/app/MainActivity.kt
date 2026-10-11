@@ -935,6 +935,13 @@ private fun SettingsScreen(
         TextButton(onClick = { ArgonAccessibilityService.openAccessibilitySettings(context) }) {
             Text("Accessibility controls")
         }
+        Text(
+            "Optional: let Argon count supported mail/calendar notification groups and flag missed-call alerts. It does not read full inbox contents.",
+            color = Color(0xFF6F8BA8), fontSize = 11.sp
+        )
+        TextButton(onClick = { NotificationDigestService.openAccessSettings(context) }) {
+            Text(if (NotificationDigestService.hasAccess(context)) "Notification access settings" else "Connect email / calendar / missed-call notifications")
+        }
         Spacer(Modifier.height(18.dp))
         Divider(color = Color(0xFF20364D))
         Spacer(Modifier.height(12.dp))

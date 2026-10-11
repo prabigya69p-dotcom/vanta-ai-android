@@ -101,6 +101,8 @@ object VantaLocalCommandRouter {
         val p = prompt.trim()
         val lower = p.lowercase(Locale.getDefault())
 
+        VantaRoutineTools.execute(context, p)?.let { return it }
+
         if (lower == "open settings" || lower == "open vanta settings") {
             return LocalCommandResult("Opening Vanta settings.", shouldOpenSettings = true)
         }
@@ -203,6 +205,7 @@ object VantaLocalCommandRouter {
                 "whatsapp" to listOf("com.whatsapp"), "instagram" to listOf("com.instagram.android"),
                 "facebook" to listOf("com.facebook.katana"), "tiktok" to listOf("com.zhiliaoapp.musically"),
                 "spotify" to listOf("com.spotify.music"), "roblox" to listOf("com.roblox.client"),
+                "notion" to listOf("notion.id"),
                 "play store" to listOf("com.android.vending"), "phone" to listOf("com.google.android.dialer", "com.samsung.android.dialer"),
                 "dialer" to listOf("com.google.android.dialer", "com.samsung.android.dialer"),
                 "messages" to listOf("com.google.android.apps.messaging", "com.samsung.android.messaging"),
