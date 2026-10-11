@@ -5,7 +5,7 @@
 2. Enable **Gmail API**, **Google Calendar API**, and **Google Tasks API**.
 3. Configure Google Auth Platform / OAuth consent screen. Add your own Google account as a test user while the app is in testing.
 4. Create an **Android OAuth client** with package name `com.vanta.app` and the SHA-1 fingerprint for the certificate signing the APK. The GitHub Actions debug APK and any release APK can have different fingerprints.
-5. Optionally create an API key and restrict it to the Android app (package name and signing-certificate SHA-1) and only the Google APIs this app uses. When ready, place it in the `GoogleWorkspaceApi.API_KEY` constant in `app/src/main/java/com/vanta/app/GoogleWorkspaceApi.kt`. Client-side API keys can be extracted from an APK, so restrict the key in Google Cloud. Do not commit a real key to a public repository.
+5. Add the key to GitHub without committing it: open the repository → **Settings → Secrets and variables → Actions → New repository secret**. Set the name to `GOOGLE_API_KEY` and paste the key as the secret value. The Android workflow passes it to Gradle only during the APK build. If the repository is public, restrict the key in Google Cloud and remember that a key embedded in an APK can be extracted.
 6. Install Vanta, open Settings → Google Workspace → **Connect Google Workspace**, and approve Gmail, Calendar, and Tasks permissions.
 7. Gmail modify/send, Calendar event, and Tasks scopes are sensitive. Public distribution may require Google's verification. Keep the OAuth app in test mode for personal testing until verification is complete.
 

@@ -14,7 +14,7 @@ import java.util.TimeZone
  * Private Gmail/Calendar/Tasks data still requires user-consented OAuth authorization.
  */
 object GoogleWorkspaceApi {
-    const val API_KEY: String = ""
+    val API_KEY: String = BuildConfig.GOOGLE_API_KEY
     private fun keyedUrl(url: String, apiKey: String): String {
         if (apiKey.isBlank()) return url
         val separator = if (url.contains("?")) "&" else "?"

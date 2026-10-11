@@ -145,6 +145,7 @@ jobs:
           NVIDIA_MODEL: ${{ vars.NVIDIA_MODEL }}
           FISH_API_KEY: ${{ secrets.FISH_API_KEY }}
           FISH_VOICE_ID: ${{ vars.FISH_VOICE_ID }}
+          GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
         run: gradle testDebugUnitTest assembleDebug --stacktrace
 
       - name: Upload APK

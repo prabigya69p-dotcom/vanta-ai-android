@@ -16,10 +16,12 @@ android {
         val nimModel = System.getenv("NVIDIA_MODEL") ?: ""
         val fishApiKey = System.getenv("FISH_API_KEY") ?: ""
         val fishVoiceId = System.getenv("FISH_VOICE_ID") ?: ""
+        val googleApiKey = System.getenv("GOOGLE_API_KEY") ?: ""
         buildConfigField("String", "NVIDIA_API_KEY", quotedBuildValue(nimApiKey))
         buildConfigField("String", "NVIDIA_MODEL", quotedBuildValue(nimModel))
         buildConfigField("String", "FISH_AUDIO_API_KEY", quotedBuildValue(fishApiKey))
         buildConfigField("String", "FISH_AUDIO_REFERENCE_ID", quotedBuildValue(fishVoiceId))
+        buildConfigField("String", "GOOGLE_API_KEY", quotedBuildValue(googleApiKey))
         applicationId = "com.vanta.app"
         minSdk = 26
         targetSdk = 36
