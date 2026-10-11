@@ -229,8 +229,7 @@ private class GoogleWorkspaceClient(context: Context) {
             """^(?:create|schedule|add)\s+(?:a\s+)?(?:google\s+)?calendar event\s+(.+?)\s+on\s+(\d{4}-\d{2}-\d{2})\s+from\s+(\d{1,2}:\d{2})\s+to\s+(\d{1,2}:\d{2})$""",
             RegexOption.IGNORE_CASE
         )
-        val match = pattern.matchEntire(raw) ?: return
-            "Use: schedule calendar event Project meeting on 2026-10-12 from 15:00 to 16:00. Use 24-hour times."
+        val match = pattern.matchEntire(raw) ?: return "Use: schedule calendar event Project meeting on 2026-10-12 from 15:00 to 16:00. Use 24-hour times."
         val title = match.groupValues[1].trim().take(180)
         return try {
             val date = LocalDate.parse(match.groupValues[2])
@@ -254,8 +253,7 @@ private class GoogleWorkspaceClient(context: Context) {
     }
 
     fun sendEmailCommand(raw: String): String {
-        val match = VantaIntegrationsEmailParser.send(raw) ?: return
-            "Use: send email to person@example.com subject Subject text body Message text."
+        val match = VantaIntegrationsEmailParser.send(raw) ?: return "Use: send email to person@example.com subject Subject text body Message text."
         val to = match.first
         if (!Regex("""^[^\s@]+@[^\s@]+\.[^\s@]+$""").matches(to)) {
             return "That email address does not look valid. Try the send command again with a valid address."
@@ -264,8 +262,7 @@ private class GoogleWorkspaceClient(context: Context) {
     }
 
     fun replyToLatestCommand(raw: String): String {
-        val body = VantaIntegrationsEmailParser.reply(raw) ?: return
-            "Use: reply to latest email with your message."
+        val body = VantaIntegrationsEmailParser.reply(raw) ?: return "Use: reply to latest email with your message."
         val inbox = request("https://gmail.googleapis.com/gmail/v1/users/me/messages?q=in%3Ainbox&maxResults=1")
         val row = inbox.optJSONArray("messages")?.optJSONObject(0)
             ?: return "I could not find an email in your inbox to reply to."
