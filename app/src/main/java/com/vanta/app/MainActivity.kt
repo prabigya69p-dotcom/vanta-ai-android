@@ -78,6 +78,7 @@ class MainActivity : ComponentActivity() {
     private var fishPlayer: MediaPlayer? = null
     private val incomingImage = mutableStateOf<Uri?>(null)
     private val incomingWakeQuery = mutableStateOf<String?>(null)
+    val orbAnimationMode = mutableStateOf(ArgonOrbMode.STANDBY)
 
     private var pendingCameraAction: (() -> Unit)? = null
     private var pendingSpeechResult: ((String) -> Unit)? = null
@@ -121,8 +122,8 @@ class MainActivity : ComponentActivity() {
         }.also { engine ->
             engine.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
                 override fun onStart(utteranceId: String?) { WakeService.pause(this@MainActivity) }
-                override fun onDone(utteranceId: String?) { WakeService.resume(this@MainActivity) }
-                override fun onError(utteranceId: String?) { WakeService.resume(this@MainActivity) }
+                override fun onDone(utteranceId: String?) { if (orbAnimationMode.value == ArgonOrbMode.SPEAKING) orbAnimationMode.value = ArgonOrbMode.STANDBY; WakeService.resume(this@MainActivity) }
+                override fun onError(utteranceId: String?) { if (orbAnimationMode.value == ArgonOrbMode.SPEAKING) orbAnimationMode.value = ArgonOrbMode.STANDBY; WakeService.resume(this@MainActivity) }
             })
         }
         setContent { VantaApp(store, memory, this, incomingImage, incomingWakeQuery) }
@@ -168,6 +169,7 @@ class MainActivity : ComponentActivity() {
 
     fun speak(text: String) {
         stopListening()
+        orbAnimationMode.value = ArgonOrbMode.SPEAKING
         val fishKey = store.loadFishAudioApiKey()
         val fishReference = store.loadFishAudioReferenceId()
         if (fishKey.isNotBlank()) {
@@ -184,12 +186,14 @@ class MainActivity : ComponentActivity() {
                         fishPlayer = MediaPlayer().apply {
                             setDataSource(audio.absolutePath)
                             setOnCompletionListener {
+                                if (orbAnimationMode.value == ArgonOrbMode.SPEAKING) orbAnimationMode.value = ArgonOrbMode.STANDBY
                                 release()
                                 fishPlayer = null
                                 audio.delete()
                                 WakeService.resume(this@MainActivity)
                             }
                             setOnErrorListener { player, _, _ ->
+                                if (orbAnimationMode.value == ArgonOrbMode.SPEAKING) orbAnimationMode.value = ArgonOrbMode.STANDBY
                                 player.release()
                                 fishPlayer = null
                                 audio.delete()
@@ -250,6 +254,7 @@ class MainActivity : ComponentActivity() {
             return
         }
         recognizer = currentRecognizer
+        orbAnimationMode.value = ArgonOrbMode.LISTENING
         var completed = false
         var latestPartial: String? = null
 
@@ -261,6 +266,7 @@ class MainActivity : ComponentActivity() {
             WakeService.resume(this@MainActivity)
 
             val cleanedTranscript = transcript?.trim()?.takeIf { it.isNotEmpty() }
+            orbAnimationMode.value = if (cleanedTranscript != null) ArgonOrbMode.THINKING else ArgonOrbMode.STANDBY
             if (cleanedTranscript != null) {
                 onText(cleanedTranscript)
             } else {
@@ -324,6 +330,7 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun stopListening() {
+        if (orbAnimationMode.value == ArgonOrbMode.LISTENING) orbAnimationMode.value = ArgonOrbMode.STANDBY
         // Ignore callbacks from a cancelled session so they cannot affect the next command.
         speechSessionId++
         val activeRecognizer = recognizer
@@ -334,6 +341,7 @@ class MainActivity : ComponentActivity() {
 
     fun stopSpeaking() {
         tts?.stop()
+        if (orbAnimationMode.value == ArgonOrbMode.SPEAKING) orbAnimationMode.value = ArgonOrbMode.STANDBY
     }
 
     fun cameraPermissionGranted(): Boolean =
@@ -442,6 +450,7 @@ private fun ChatScreen(
         val prompt = input.trim()
         val currentAttachments = attachments
         if ((prompt.isEmpty() && currentAttachments.isEmpty()) || busy) return
+        activity.orbAnimationMode.value = ArgonOrbMode.THINKING
 
         if (codeDevMode) {
             if (currentAttachments.isNotEmpty()) {
@@ -675,6 +684,10 @@ private fun ChatScreen(
                 Text("⚙", fontSize = 22.sp, color = Color.White)
             }
         }
+
+        Spacer(Modifier.height(3.dp))
+        ArgonOrbPanel(mode = activity.orbAnimationMode.value)
+        Spacer(Modifier.height(4.dp))
 
         Spacer(Modifier.height(8.dp))
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -1053,23 +1066,6 @@ private fun SettingsScreen(
         },enabled=!integrationBusy&&notionTask.isNotBlank(),modifier=Modifier.fillMaxWidth()){Text("Add task to Notion")}
         Text("Voice commands: check my unread emails; what's on my calendar; show my Notion tasks; add task to Notion buy notebooks.",color=Color(0xFF6F8BA8),fontSize=11.sp)
         Spacer(Modifier.height(12.dp))
-        Text("Integrations", color = Color(0xFF8EB5DC), fontSize = 18.sp)
-        Text("Google status: " + if (store.loadGoogleAccessToken().isBlank()) "Not connected" else "Connected (reconnect if token expires)", color = Color(0xFF6F8BA8), fontSize = 12.sp)
-        Button(onClick = { VantaIntegrations.openGoogleConnect(context) }) { Text("Connect Google account") }
-        Text("Approve only the Gmail and Calendar permissions you want Vanta to use. Access tokens expire.", color = Color(0xFF6F8BA8), fontSize = 11.sp)
-        Spacer(Modifier.height(10.dp))
-        OutlinedTextField(value = notionToken, onValueChange = { notionToken = it }, modifier = Modifier.fillMaxWidth(), label = { Text("Notion integration token") }, singleLine = true, visualTransformation = PasswordVisualTransformation())
-        OutlinedTextField(value = notionDatabaseId, onValueChange = { notionDatabaseId = it }, modifier = Modifier.fillMaxWidth(), label = { Text("Notion database ID") }, singleLine = true)
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            TextButton(onClick = { VantaIntegrations.openNotionHelp(context) }) { Text("Create Notion integration") }
-            Button(onClick = {
-                val tokenSaved = runCatching { store.saveNotionToken(notionToken) }.getOrDefault(false)
-                val dbSaved = runCatching { store.saveNotionDatabaseId(notionDatabaseId) }.getOrDefault(false)
-                if (tokenSaved && dbSaved) { notionToken = ""; saveStatus = "Notion connection saved securely on this device." }
-                else saveStatus = "Could not save Notion settings."
-            }) { Text("Save Notion") }
-        }
-        Text("Share the target database with your Notion integration before asking Argon to read it.", color = Color(0xFF6F8BA8), fontSize = 11.sp)
         Spacer(Modifier.height(18.dp))
         Divider(color = Color(0xFF20364D))
         Spacer(Modifier.height(12.dp))
