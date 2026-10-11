@@ -21,6 +21,7 @@
         android:label="VANTA"
         android:allowBackup="true"
         android:supportsRtl="true">
+        <activity android:name=".GoogleWorkspaceAuthActivity" android:exported="false" />
         <activity
             android:name=".MainActivity"
             android:exported="true"
@@ -42,6 +43,16 @@
                 <data android:mimeType="image/*" />
             </intent-filter>
         </activity>
+
+        <service
+            android:name=".NotificationDigestService"
+            android:label="VANTA notification digest"
+            android:permission="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.service.notification.NotificationListenerService" />
+            </intent-filter>
+        </service>
 
         <service
             android:name=".WakeService"
