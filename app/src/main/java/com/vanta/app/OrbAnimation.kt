@@ -7,6 +7,7 @@ import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
@@ -38,7 +39,7 @@ enum class ArgonOrbMode { STANDBY, LISTENING, THINKING, SPEAKING }
  * The animation responds to actual speech and request lifecycle states.
  */
 @Composable
-fun ArgonOrbPanel(mode: ArgonOrbMode, modifier: Modifier = Modifier) {
+fun ArgonOrbPanel(mode: ArgonOrbMode, modifier: Modifier = Modifier, onTap: () -> Unit = {}) {
     val transition = rememberInfiniteTransition(label = "argon-orb")
     val pulseMin = when (mode) {
         ArgonOrbMode.STANDBY -> 0.96f
@@ -118,7 +119,7 @@ fun ArgonOrbPanel(mode: ArgonOrbMode, modifier: Modifier = Modifier) {
             modifier = Modifier.fillMaxWidth().height(142.dp),
             contentAlignment = Alignment.Center
         ) {
-            Canvas(Modifier.size(142.dp)) {
+            Canvas(Modifier.size(142.dp).clickable(onClick = onTap)) {
                 val cx = size.width * 0.5f
                 val cy = size.height * 0.5f
                 val min = size.minDimension
@@ -231,15 +232,15 @@ fun ArgonOrbPanel(mode: ArgonOrbMode, modifier: Modifier = Modifier) {
                 // Flowing glass-light ribbons within the sphere, with mode-dependent motion.
                 val phase = rotation * (if (thinking) 0.018f else 0.009f)
                 val wave = Path().apply {
-                    moveTo(cx - core * 0.83f, cy - core * (0.12f + 0.12f * sin(phase)))
+                    moveTo(cx - core * 0.83f, cy - core * (0.12f + 0.12f * sin(phase.toDouble()).toFloat()))
                     cubicTo(
-                        cx - core * 0.64f, cy - core * (0.95f + 0.07f * sin(phase + 1f)),
-                        cx + core * 0.18f, cy - core * (0.85f + 0.08f * sin(phase + 2f)),
-                        cx + core * 0.82f, cy + core * (0.04f + 0.10f * sin(phase + 1.5f))
+                        cx - core * 0.64f, cy - core * (0.95f + 0.07f * sin((phase + 1f).toDouble()).toFloat()),
+                        cx + core * 0.18f, cy - core * (0.85f + 0.08f * sin((phase + 2f).toDouble()).toFloat()),
+                        cx + core * 0.82f, cy + core * (0.04f + 0.10f * sin((phase + 1.5f).toDouble()).toFloat())
                     )
                     cubicTo(
-                        cx + core * 0.45f, cy + core * (0.53f + 0.09f * sin(phase + 2.4f)),
-                        cx - core * 0.25f, cy + core * (0.60f + 0.05f * sin(phase + 3f)),
+                        cx + core * 0.45f, cy + core * (0.53f + 0.09f * sin((phase + 2.4f).toDouble()).toFloat()),
+                        cx - core * 0.25f, cy + core * (0.60f + 0.05f * sin((phase + 3f).toDouble()).toFloat),
                         cx - core * 0.76f, cy + core * 0.28f
                     )
                 }

@@ -626,6 +626,20 @@ private fun ChatScreen(
         }
     }
 
+    fun listenForCommand() {
+        activity.listen(
+            onText = { spoken ->
+                input = spoken.trim()
+                if (input.isNotBlank()) send()
+            },
+            onFailure = { failure ->
+                activityStatus = failure
+                messages = messages + ChatMessage(false, failure)
+                persist()
+            }
+        )
+    }
+
     LaunchedEffect(incomingWakeQuery.value) {
         val wakeQuery = incomingWakeQuery.value ?: return@LaunchedEffect
         incomingWakeQuery.value = null
@@ -686,7 +700,7 @@ private fun ChatScreen(
         }
 
         Spacer(Modifier.height(3.dp))
-        ArgonOrbPanel(mode = activity.orbAnimationMode.value)
+        ArgonOrbPanel(mode = activity.orbAnimationMode.value, onTap = { if (!busy) listenForCommand() })
         Spacer(Modifier.height(4.dp))
 
         Spacer(Modifier.height(8.dp))
@@ -822,17 +836,7 @@ private fun ChatScreen(
                 maxLines = 4
             )
             FilledIconButton(onClick = {
-                activity.listen(
-                    onText = { spoken ->
-                        input = spoken.trim()
-                        if (input.isNotBlank()) send()
-                    },
-                    onFailure = { failure ->
-                        activityStatus = failure
-                        messages = messages + ChatMessage(false, failure)
-                        persist()
-                    }
-                )
+                listenForCommand()
             }, shape = CircleShape) {
                 Text("🎙")
             }
