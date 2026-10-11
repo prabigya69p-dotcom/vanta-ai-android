@@ -24,6 +24,13 @@ object VantaRoutineTools {
         val prompt = raw.trim()
         val lower = prompt.lowercase(Locale.ROOT)
 
+        if (lower in setOf("connect google", "connect gmail", "connect google calendar", "connect google account")) {
+            VantaIntegrations.openGoogleConnect(context)
+            return LocalCommandResult("Opening Google's permission screen. Approve the requested Gmail and Calendar access to connect Argon.")
+        }
+        if (lower in setOf("open integrations", "integration settings")) {
+            return LocalCommandResult("Open Vanta Settings and scroll to Integrations to connect Google and configure Notion.", shouldOpenSettings = true)
+        }
         if (lower in setOf("open notification access", "enable notification access", "connect notifications", "connect email notifications", "connect missed call notifications")) {
             NotificationDigestService.openAccessSettings(context)
             return LocalCommandResult("Opening Android notification access settings. Enable VANTA notification digest there, and allow VANTA notifications in App permissions so reminders can appear.")

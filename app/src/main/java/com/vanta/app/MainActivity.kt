@@ -452,6 +452,27 @@ private fun ChatScreen(
 
         val text = prompt.ifEmpty { "Analyze these attachments." }
         val detectedMode = VantaSmart.modeFor(text, mode)
+        if (currentAttachments.isEmpty() && VantaIntegrations.isDataCommand(text)) {
+            messages = messages + ChatMessage(true, text, attachments = currentAttachments)
+            input = ""
+            attachments = emptyList()
+            busy = true
+            activityStatus = "Connecting to your account..."
+            scope.launch {
+                try {
+                    val reply = withContext(Dispatchers.IO) { VantaIntegrations.execute(context, text) }
+                    messages = messages + ChatMessage(false, reply)
+                    persist()
+                    activity.speak(reply)
+                } catch (t: Throwable) {
+                    val reply = "Integration error: " + (t.message ?: "request failed")
+                    messages = messages + ChatMessage(false, reply)
+                    persist()
+                    activity.speak(reply)
+                } finally { busy = false; activityStatus = "Ready" }
+            }
+            return
+        }
         val local = if (currentAttachments.isEmpty()) VantaLocalCommandRouter.execute(context, text, memory) else null
         val route = VantaRouter.decide(
             prompt = text,
@@ -833,6 +854,8 @@ private fun SettingsScreen(
     var wake by remember { mutableStateOf(store.loadWakeEnabled()) }
     var saveStatus by remember { mutableStateOf("") }
     var githubToken by remember { mutableStateOf("") }
+    var notionToken by remember { mutableStateOf("") }
+    var notionDatabaseId by remember { mutableStateOf(store.loadNotionDatabaseId()) }
     val context = LocalContext.current
     val wakePermissionLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
         wake = granted
@@ -942,6 +965,26 @@ private fun SettingsScreen(
         TextButton(onClick = { NotificationDigestService.openAccessSettings(context) }) {
             Text(if (NotificationDigestService.hasAccess(context)) "Notification access settings" else "Connect email / calendar / missed-call notifications")
         }
+        Spacer(Modifier.height(18.dp))
+        Divider(color = Color(0xFF20364D))
+        Spacer(Modifier.height(12.dp))
+        Text("Integrations", color = Color(0xFF8EB5DC), fontSize = 18.sp)
+        Text("Google status: " + if (store.loadGoogleAccessToken().isBlank()) "Not connected" else "Connected (reconnect if token expires)", color = Color(0xFF6F8BA8), fontSize = 12.sp)
+        Button(onClick = { VantaIntegrations.openGoogleConnect(context) }) { Text("Connect Google account") }
+        Text("Approve only the Gmail and Calendar permissions you want Vanta to use. Access tokens expire.", color = Color(0xFF6F8BA8), fontSize = 11.sp)
+        Spacer(Modifier.height(10.dp))
+        OutlinedTextField(value = notionToken, onValueChange = { notionToken = it }, modifier = Modifier.fillMaxWidth(), label = { Text("Notion integration token") }, singleLine = true, visualTransformation = PasswordVisualTransformation())
+        OutlinedTextField(value = notionDatabaseId, onValueChange = { notionDatabaseId = it }, modifier = Modifier.fillMaxWidth(), label = { Text("Notion database ID") }, singleLine = true)
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            TextButton(onClick = { VantaIntegrations.openNotionHelp(context) }) { Text("Create Notion integration") }
+            Button(onClick = {
+                val tokenSaved = runCatching { store.saveNotionToken(notionToken) }.getOrDefault(false)
+                val dbSaved = runCatching { store.saveNotionDatabaseId(notionDatabaseId) }.getOrDefault(false)
+                if (tokenSaved && dbSaved) { notionToken = ""; saveStatus = "Notion connection saved securely on this device." }
+                else saveStatus = "Could not save Notion settings."
+            }) { Text("Save Notion") }
+        }
+        Text("Share the target database with your Notion integration before asking Argon to read it.", color = Color(0xFF6F8BA8), fontSize = 11.sp)
         Spacer(Modifier.height(18.dp))
         Divider(color = Color(0xFF20364D))
         Spacer(Modifier.height(12.dp))
