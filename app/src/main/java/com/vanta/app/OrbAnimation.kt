@@ -240,7 +240,7 @@ fun ArgonOrbPanel(mode: ArgonOrbMode, modifier: Modifier = Modifier, onTap: () -
                     )
                     cubicTo(
                         cx + core * 0.45f, cy + core * (0.53f + 0.09f * sin((phase + 2.4f).toDouble()).toFloat()),
-                        cx - core * 0.25f, cy + core * (0.60f + 0.05f * sin((phase + 3f).toDouble()).toFloat),
+                        cx - core * 0.25f, cy + core * (0.60f + 0.05f * sin((phase + 3f).toDouble()).toFloat()),
                         cx - core * 0.76f, cy + core * 0.28f
                     )
                 }
