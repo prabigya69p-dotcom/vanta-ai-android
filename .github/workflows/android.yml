@@ -9,6 +9,49 @@ permissions:
   contents: read
 
 jobs:
+  gemini-api:
+    name: Test Gemini API
+    runs-on: ubuntu-latest
+    steps:
+      - name: Send a minimal prompt to Gemini
+        env:
+          GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
+        run: |
+          set -euo pipefail
+          if [ -z "${GOOGLE_API_KEY:-}" ]; then
+            echo "GOOGLE_API_KEY secret is missing. Add it in repository Actions secrets."
+            exit 1
+          fi
+
+          PAYLOAD=$(jq -n '{
+            contents: [{parts: [{text: "Reply with only the word OK."}]}],
+            generationConfig: {temperature: 0, maxOutputTokens: 16}
+          }')
+          CODE=$(curl -sS --connect-timeout 20 --max-time 90 \
+            -o /tmp/gemini.json -w '%{http_code}' \
+            -X POST 'https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent' \
+            -H "x-goog-api-key: $GOOGLE_API_KEY" \
+            -H 'Content-Type: application/json' \
+            -d "$PAYLOAD" || true)
+
+          if [ "$CODE" != "200" ]; then
+            echo "Gemini API returned HTTP $CODE."
+            jq -c '{error: {code: .error.code, status: .error.status, message: .error.message}}' /tmp/gemini.json 2>/dev/null | head -c 800 || true
+            if [ "$CODE" = "401" ] || [ "$CODE" = "403" ]; then
+              echo "Check GOOGLE_API_KEY and whether Gemini API access is enabled for that key."
+            elif [[ "$CODE" =~ ^5[0-9][0-9]$ ]] || [ "$CODE" = "000" ]; then
+              echo "This may be a temporary Gemini service or network error."
+            fi
+            exit 1
+          fi
+
+          if ! jq -e '[.candidates[0].content.parts[]?.text // empty] | join("") | length > 0' /tmp/gemini.json >/dev/null; then
+            echo "Gemini returned HTTP 200 but no assistant text."
+            jq -c '{error, promptFeedback, candidates}' /tmp/gemini.json 2>/dev/null | head -c 1000 || true
+            exit 1
+          fi
+          echo "Gemini API passed: gemini-3.8-flash returned assistant text."
+
   nvidia-nim:
     name: Test NVIDIA NIM / GLM
     runs-on: ubuntu-latest
