@@ -107,12 +107,5 @@ jobs:
           fi
           git commit -m "Code Dev: implement validated source update"
           git push origin "$BRANCH"
-          printf 'Task requested:
-
-%s
-
-Validation: `gradle testDebugUnitTest assembleDebug` passed.
-
-The APK is available as the workflow artifact. Review all changes before merging.
-' "$CODE_DEV_TASK" > /tmp/pr-body.md
+          printf '%s\n' "Task requested:" "" "$CODE_DEV_TASK" "" "Validation: gradle testDebugUnitTest assembleDebug passed." "" "The APK is available as the workflow artifact. Review all changes before merging." > /tmp/pr-body.md
           gh pr create --repo "$GH_REPO" --base "$BASE_BRANCH" --head "$BRANCH" --title "Code Dev: validated update #${GITHUB_RUN_NUMBER}" --body-file /tmp/pr-body.md
