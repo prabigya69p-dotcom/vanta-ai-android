@@ -103,7 +103,7 @@ object VantaIntegrations {
 private class GoogleWorkspaceClient(context: Context) {
     private val store = VantaStore(context)
     private val token = store.loadGoogleAccessToken()
-    private val apiKey = store.loadGoogleApiKey()
+    private val apiKey = GoogleWorkspaceApi.API_KEY
     private val formatter = DateTimeFormatter.ofPattern("h:mm a").withZone(ZoneId.systemDefault())
 
     private fun keyedUrl(url: String): String {

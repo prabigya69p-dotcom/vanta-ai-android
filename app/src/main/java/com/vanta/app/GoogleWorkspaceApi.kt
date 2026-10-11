@@ -10,8 +10,11 @@ import java.util.Date
 import java.util.Locale
 import java.util.TimeZone
 
-/** Diagnostics for Google APIs. OAuth authorizes private data; the API key is optional. */
+/** Google Workspace API configuration. Add the project API key here when it is supplied.
+ * Private Gmail/Calendar/Tasks data still requires user-consented OAuth authorization.
+ */
 object GoogleWorkspaceApi {
+    const val API_KEY: String = ""
     private fun keyedUrl(url: String, apiKey: String): String {
         if (apiKey.isBlank()) return url
         val separator = if (url.contains("?")) "&" else "?"

@@ -894,7 +894,6 @@ private fun SettingsScreen(
     var wake by remember { mutableStateOf(store.loadWakeEnabled()) }
     var saveStatus by remember { mutableStateOf("") }
     var githubToken by remember { mutableStateOf("") }
-    var googleApiKey by remember { mutableStateOf("") }
     var googleTask by remember { mutableStateOf("") }
     var notionToken by remember { mutableStateOf("") }
     var notionDatabaseId by remember { mutableStateOf(store.loadNotionDatabaseId()) }
@@ -1015,36 +1014,7 @@ private fun SettingsScreen(
         Spacer(Modifier.height(14.dp))
         Text("Google Workspace", color = Color(0xFF8EB5DC), fontSize = 18.sp)
         Text(
-            "API key status: " + if (store.loadGoogleApiKey().isBlank()) "not saved" else "saved securely on this device",
-            color = Color(0xFF6F8BA8), fontSize = 12.sp
-        )
-        OutlinedTextField(
-            value = googleApiKey,
-            onValueChange = { googleApiKey = it },
-            modifier = Modifier.fillMaxWidth(),
-            singleLine = true,
-            label = { Text("Google API key (add later)") },
-            visualTransformation = PasswordVisualTransformation()
-        )
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            Button(onClick = {
-                saveStatus = if (googleApiKey.isBlank()) {
-                    "Paste a Google API key first, or use Remove key."
-                } else if (runCatching { store.saveGoogleApiKey(googleApiKey) }.getOrDefault(false)) {
-                    googleApiKey = ""
-                    "Google API key saved securely on this device."
-                } else {
-                    "Could not save the Google API key."
-                }
-            }) { Text("Save Google key") }
-            OutlinedButton(onClick = {
-                val cleared = runCatching { store.saveGoogleApiKey("") }.getOrDefault(false)
-                googleApiKey = ""
-                saveStatus = if (cleared) "Google API key cleared." else "Could not clear the Google API key."
-            }) { Text("Remove key") }
-        }
-        Text(
-            "A Google API key identifies the Cloud project; it does not grant access to private Gmail, Calendar, or Tasks data. Connect your Google account below too.",
+            "Google API key is configured in the app build. Connect your Google account to authorize private Gmail, Calendar, and Tasks data.",
             color = Color(0xFF6F8BA8), fontSize = 11.sp
         )
         Button(
@@ -1059,7 +1029,7 @@ private fun SettingsScreen(
                 integrationScope.launch {
                     saveStatus = try {
                         withContext(Dispatchers.IO) {
-                            GoogleWorkspaceApi.summary(store.loadGoogleAccessToken(), store.loadGoogleApiKey())
+                            GoogleWorkspaceApi.summary(store.loadGoogleAccessToken(), GoogleWorkspaceApi.API_KEY)
                         }
                     } catch (error: Throwable) {
                         error.message ?: "Google connection test failed."
