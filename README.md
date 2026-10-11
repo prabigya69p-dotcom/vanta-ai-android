@@ -23,3 +23,11 @@ VANTA is a clean, adaptive Android AI assistant built with Kotlin + Jetpack Comp
 - GitHub Actions debug APK build
 
 The implementation intentionally keeps sensitive OS actions permission-gated and uses Android system surfaces where possible.
+
+## Connected accounts and hands-free Argon
+
+- Open VANTA Settings and choose **Connect Google Workspace**. Approve the requested read-only Gmail and Calendar scopes. Voice commands: "check my unread emails" and "what's on my calendar". Reconnect if Google authorization expires.
+- For Notion, create an internal integration in your workspace, grant it read/insert content access, and share the target task database with the integration. Paste its token and database ID in VANTA Settings. The token is stored encrypted on-device; do not put it in source code or GitHub.
+- Voice commands: "show my Notion tasks" and "add task to Notion <task name>".
+- Enable **Hey Argon hands-free** and grant microphone permission. Saying only "Hey Argon" arms a follow-up utterance without opening chat; VANTA opens after the next command. Android battery and microphone restrictions can still interrupt recognition.
+- Wake detection currently uses Android SpeechRecognizer, not a dedicated always-on wake-word model. Gmail is read-only; Calendar reads upcoming events only; Notion can list and create task titles in the configured database.

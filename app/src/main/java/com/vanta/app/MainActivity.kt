@@ -899,8 +899,6 @@ private fun SettingsScreen(
     var notionTask by remember { mutableStateOf("") }
     var integrationBusy by remember { mutableStateOf(false) }
     val integrationScope = rememberCoroutineScope()
-    var notionToken by remember { mutableStateOf("") }
-    var notionDatabaseId by remember { mutableStateOf(store.loadNotionDatabaseId()) }
     val context = LocalContext.current
     val wakePermissionLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
         wake = granted
