@@ -12,6 +12,7 @@ jobs:
   gemini-api:
     name: Test Gemini API
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     steps:
       - name: Send a minimal prompt to Gemini
         env:
@@ -23,24 +24,53 @@ jobs:
             exit 1
           fi
 
+          # Keep this smoke test fast: Gemini 3.8 Flash defaults to medium thinking.
           PAYLOAD=$(jq -n '{
             contents: [{parts: [{text: "Reply with only the word OK."}]}],
-            generationConfig: {temperature: 0, maxOutputTokens: 16}
+            generationConfig: {
+              thinkingConfig: {thinkingLevel: "low"},
+              maxOutputTokens: 64
+            }
           }')
-          CODE=$(curl -sS --connect-timeout 20 --max-time 90 \
-            -o /tmp/gemini.json -w '%{http_code}' \
-            -X POST 'https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent' \
-            -H "x-goog-api-key: $GOOGLE_API_KEY" \
-            -H 'Content-Type: application/json' \
-            -d "$PAYLOAD" || true)
+
+          CODE=000
+          CURL_EXIT=0
+          for attempt in 1 2 3; do
+            echo "Gemini API request attempt $attempt/3..."
+            rm -f /tmp/gemini.json
+            set +e
+            CODE=$(curl -sS --connect-timeout 15 --max-time 45 \
+              -o /tmp/gemini.json -w '%{http_code}' \
+              -X POST 'https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent' \
+              -H "x-goog-api-key: $GOOGLE_API_KEY" \
+              -H 'Content-Type: application/json' \
+              -d "$PAYLOAD")
+            CURL_EXIT=$?
+            set -e
+
+            if [ "$CODE" = "200" ]; then
+              break
+            fi
+
+            # Retry only transient network, rate-limit, and server failures.
+            if { [ "$CODE" = "000" ] || [ "$CODE" = "429" ] || [[ "$CODE" =~ ^5[0-9][0-9]$ ]]; } && [ "$attempt" -lt 3 ]; then
+              WAIT=$((attempt * 5))
+              echo "Transient Gemini failure (HTTP $CODE, curl exit $CURL_EXIT); retrying in ${WAIT}s."
+              sleep "$WAIT"
+              continue
+            fi
+            break
+          done
 
           if [ "$CODE" != "200" ]; then
-            echo "Gemini API returned HTTP $CODE."
-            jq -c '{error: {code: .error.code, status: .error.status, message: .error.message}}' /tmp/gemini.json 2>/dev/null | head -c 800 || true
-            if [ "$CODE" = "401" ] || [ "$CODE" = "403" ]; then
+            echo "Gemini API failed after $attempt attempt(s): HTTP $CODE, curl exit $CURL_EXIT."
+            if [ -s /tmp/gemini.json ]; then
+              jq -c '{error: {code: .error.code, status: .error.status, message: .error.message}}' /tmp/gemini.json 2>/dev/null | head -c 800 || head -c 800 /tmp/gemini.json || true
+            fi
+            if [ "$CODE" = "000" ]; then
+              echo "No HTTP response was received. Check transient network/API availability; this does not by itself mean the key is invalid."
+            elif [ "$CODE" = "401" ] || [ "$CODE" = "403" ]; then
               echo "Check GOOGLE_API_KEY and whether Gemini API access is enabled for that key."
-            elif [[ "$CODE" =~ ^5[0-9][0-9]$ ]] || [ "$CODE" = "000" ]; then
-              echo "This may be a temporary Gemini service or network error."
             fi
             exit 1
           fi
@@ -51,7 +81,6 @@ jobs:
             exit 1
           fi
           echo "Gemini API passed: gemini-3.8-flash returned assistant text."
-
   nvidia-nim:
     name: Test NVIDIA NIM / GLM
     runs-on: ubuntu-latest
