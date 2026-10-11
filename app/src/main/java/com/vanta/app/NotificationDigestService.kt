@@ -88,7 +88,7 @@ class NotificationDigestService : NotificationListenerService() {
         fun hasAccess(context: Context): Boolean {
             val enabled = Settings.Secure.getString(
                 context.contentResolver,
-                Settings.Secure.ENABLED_NOTIFICATION_LISTENERS
+                "enabled_notification_listeners"
             ).orEmpty()
             val expected = ComponentName(context, NotificationDigestService::class.java).flattenToString()
             return enabled.split(':').any { it.equals(expected, ignoreCase = true) }
