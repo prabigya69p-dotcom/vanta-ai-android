@@ -3,7 +3,7 @@ name: Vanta Full Test Suite
 on:
   workflow_dispatch:
   push:
-    branches: [main, fix/hands-free-wake-word]
+    branches: [main, fix/hands-free-wake-word, 'feat/**']
 
 permissions:
   contents: read
