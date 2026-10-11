@@ -199,11 +199,5 @@ class VantaStore(context: Context) {
 
     fun clearChat() = prefs.edit().remove("chat").apply()
 
-    fun saveGoogleAccessToken(value: String): Boolean = saveEncrypted("google_access_token_v1", value)
-    fun loadGoogleAccessToken(): String = loadEncrypted("google_access_token_v1")
-    fun saveNotionToken(value: String): Boolean = saveEncrypted("notion_integration_token_v1", value)
-    fun loadNotionToken(): String = loadEncrypted("notion_integration_token_v1")
-    fun saveNotionDatabaseId(value: String): Boolean = saveEncrypted("notion_database_id_v1", value)
-    fun loadNotionDatabaseId(): String = loadEncrypted("notion_database_id_v1")
 
 }
