@@ -14,9 +14,11 @@ echo "Found APK: $APK"
 PACKAGE="$("$ANDROID_HOME/cmdline-tools/latest/bin/apkanalyzer" manifest application-id "$APK")"
 DEVICE="${ANDROID_SERIAL:-emulator-5554}"
 adb -s "$DEVICE" devices
-adb -s "$DEVICE" wait-for-device
-timeout 60s adb -s "$DEVICE" install -r "$APK"
-timeout 45s adb -s "$DEVICE" shell monkey -p "$PACKAGE" -c android.intent.category.LAUNCHER 1
+timeout 30s adb start-server
+timeout 30s adb -s "$DEVICE" wait-for-device
+timeout 30s adb -s "$DEVICE" shell getprop sys.boot_completed
+timeout 150s adb -s "$DEVICE" install -r "$APK"
+timeout 60s adb -s "$DEVICE" shell monkey -p "$PACKAGE" -c android.intent.category.LAUNCHER 1
 sleep 5
 if ! timeout 20s adb -s "$DEVICE" shell pidof "$PACKAGE"; then
   echo "Vanta did not remain running after launch. Recent Android logs:"

@@ -44,6 +44,10 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.core.content.ContextCompat
+import androidx.activity.result.IntentSenderRequest
+import com.google.android.gms.auth.api.identity.AuthorizationRequest
+import com.google.android.gms.auth.api.identity.Identity
+import com.google.android.gms.common.api.Scope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -79,6 +83,16 @@ class MainActivity : ComponentActivity() {
     private var pendingSpeechResult: ((String) -> Unit)? = null
     private var pendingSpeechFailure: ((String) -> Unit)? = null
     private var speechSessionId = 0
+    private var googleConnectCallback: ((String) -> Unit)? = null
+    private val googleAuthorizationLauncher = registerForActivityResult(ActivityResultContracts.StartIntentSenderForResult()) { result ->
+        val callback = googleConnectCallback; googleConnectCallback = null
+        if (result.resultCode != RESULT_OK) callback?.invoke("Google authorization was cancelled.") else {
+            val auth = runCatching { Identity.getAuthorizationClient(this).getAuthorizationResultFromIntent(result.data) }.getOrNull()
+            val token = auth?.accessToken.orEmpty()
+            val saved = token.isNotBlank() && runCatching { store.saveGoogleAccessToken(token) }.getOrDefault(false)
+            callback?.invoke(if (saved) "Google Workspace connected. Reconnect if access expires." else "Google did not return an access token. Try again.")
+        }
+    }
     private val micPermission = registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
         val callback = pendingSpeechResult
         val failure = pendingSpeechFailure
@@ -126,6 +140,21 @@ class MainActivity : ComponentActivity() {
             Intent.ACTION_VIEW -> intent.data?.takeIf { it.scheme == "content" }?.let { incomingImage.value = it }
         }
         incomingWakeQuery.value = if (intent.hasExtra("wake_query")) intent.getStringExtra("wake_query").orEmpty() else null
+    }
+
+    fun connectGoogleWorkspace(onStatus: (String) -> Unit) {
+        googleConnectCallback = onStatus
+        val request = AuthorizationRequest.builder().setRequestedScopes(listOf(Scope("https://www.googleapis.com/auth/gmail.readonly"), Scope("https://www.googleapis.com/auth/calendar.readonly"))).build()
+        Identity.getAuthorizationClient(this).authorize(request).addOnSuccessListener { result ->
+            if (result.hasResolution()) {
+                val pending = result.pendingIntent
+                if (pending == null) { googleConnectCallback = null; onStatus("Google authorization prompt was not returned.") }
+                else runCatching { googleAuthorizationLauncher.launch(IntentSenderRequest.Builder(pending.intentSender).build()) }.onFailure { googleConnectCallback = null; onStatus("Could not open Google authorization: "+(it.message ?: "unknown error")) }
+            } else {
+                val token=result.accessToken.orEmpty();val saved=token.isNotBlank()&&runCatching{store.saveGoogleAccessToken(token)}.getOrDefault(false)
+                googleConnectCallback=null;onStatus(if(saved)"Google Workspace connected. Reconnect if access expires." else "Google did not return an access token. Try again.")
+            }
+        }.addOnFailureListener { error -> googleConnectCallback=null;onStatus("Google connection failed: "+(error.message ?: "authorization error")) }
     }
 
     fun runAccessibilityVoiceCommand(command: String): String? =
@@ -347,7 +376,7 @@ private fun VantaApp(
         )
     ) {
         if (settings) {
-            SettingsScreen(store, memory) { settings = false }
+            SettingsScreen(store, memory, activity) { settings = false }
         } else {
             ChatScreen(store, memory, activity, incomingImage, incomingWakeQuery, codeDevMode, { codeDevMode = it }) { settings = true }
         }
@@ -474,12 +503,13 @@ private fun ChatScreen(
             return
         }
         val local = if (currentAttachments.isEmpty()) VantaLocalCommandRouter.execute(context, text, memory) else null
+        val integrationCommand = currentAttachments.isEmpty() && WorkspaceCommandRouter.isCommand(text)
         val route = VantaRouter.decide(
             prompt = text,
             selectedMode = detectedMode,
             hasAttachments = currentAttachments.isNotEmpty(),
             deepResearchRequested = deepResearch,
-            hasLocalAction = local != null
+            hasLocalAction = local != null || integrationCommand
         )
         activityStatus = VantaRouter.status(route)
 
@@ -492,6 +522,15 @@ private fun ChatScreen(
             if (local.shouldOpenSettings) openSettings()
             activityStatus = "Ready"
             activity.speak(local.reply)
+            return
+        }
+        if (route == VantaRoute.ANDROID_ACTION && integrationCommand) {
+            busy = true; activityStatus = "Checking connected accounts"
+            scope.launch {
+                try { val reply=withContext(Dispatchers.IO){WorkspaceCommandRouter.execute(store,text)};addAssistant(reply);activity.speak(reply) }
+                catch(error:Throwable){val reply=error.message ?: "Workspace integration failed. Check Settings.";addAssistant(reply);activity.speak(reply)}
+                finally {busy=false;activityStatus="Ready"}
+            }
             return
         }
 
@@ -843,6 +882,7 @@ private fun GeneratedImage(data: String) {
 private fun SettingsScreen(
     store: VantaStore,
     memory: VantaMemoryStore,
+    activity: MainActivity,
     onBack: () -> Unit
 ) {
     var model by remember { mutableStateOf(store.loadModel()) }
@@ -856,6 +896,9 @@ private fun SettingsScreen(
     var githubToken by remember { mutableStateOf("") }
     var notionToken by remember { mutableStateOf("") }
     var notionDatabaseId by remember { mutableStateOf(store.loadNotionDatabaseId()) }
+    var notionTask by remember { mutableStateOf("") }
+    var integrationBusy by remember { mutableStateOf(false) }
+    val integrationScope = rememberCoroutineScope()
     val context = LocalContext.current
     val wakePermissionLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
         wake = granted
@@ -967,6 +1010,48 @@ private fun SettingsScreen(
         }
         Spacer(Modifier.height(18.dp))
         Divider(color = Color(0xFF20364D))
+        Spacer(Modifier.height(14.dp))
+        Text("Account integrations", color = Color(0xFF8EB5DC), fontSize = 18.sp)
+        Text("Google: read-only Gmail inbox unread count and upcoming Calendar events. Notion: read tasks and add a task to the database you share.", color = Color(0xFF6F8BA8), fontSize = 11.sp)
+        Button(onClick = { activity.connectGoogleWorkspace { saveStatus = it } }, modifier = Modifier.fillMaxWidth()) { Text(if (store.loadGoogleAccessToken().isBlank()) "Connect Google Workspace" else "Reconnect Google Workspace") }
+        Button(onClick = {
+            integrationBusy = true
+            integrationScope.launch {
+                saveStatus = try { withContext(Dispatchers.IO) { GoogleWorkspaceApi.summary(store.loadGoogleAccessToken()) } }
+                catch(error:Throwable) { error.message ?: "Google check failed." }
+                finally { integrationBusy = false }
+            }
+        }, enabled = !integrationBusy, modifier = Modifier.fillMaxWidth()) { Text("Test Gmail + Calendar access") }
+        Spacer(Modifier.height(10.dp))
+        Text("Notion integration token", color = Color.White)
+        OutlinedTextField(value=notionToken,onValueChange={notionToken=it},modifier=Modifier.fillMaxWidth(),singleLine=true,label={Text("Internal integration token")},visualTransformation=PasswordVisualTransformation())
+        Text("Task database ID", color = Color.White)
+        OutlinedTextField(value=notionDatabaseId,onValueChange={notionDatabaseId=it},modifier=Modifier.fillMaxWidth(),singleLine=true,label={Text("Notion database ID")})
+        Row(horizontalArrangement=Arrangement.spacedBy(8.dp)) {
+            Button(onClick={
+                val saved=runCatching{store.saveNotionToken(notionToken)}.getOrDefault(false)
+                store.saveNotionDatabaseId(notionDatabaseId);notionToken=""
+                saveStatus=if(saved)"Notion token saved encrypted on this device." else "Could not save Notion token. Paste it and try again."
+            }) { Text("Save Notion") }
+            OutlinedButton(onClick={
+                integrationBusy=true
+                integrationScope.launch {
+                    saveStatus=try{withContext(Dispatchers.IO){NotionApi.testConnection(store.loadNotionToken())}}
+                    catch(error:Throwable){error.message ?: "Notion test failed."}
+                    finally{integrationBusy=false}
+                }
+            },enabled=!integrationBusy){Text("Test Notion")}
+        }
+        OutlinedTextField(value=notionTask,onValueChange={notionTask=it},modifier=Modifier.fillMaxWidth(),singleLine=true,label={Text("Task to add to Notion")})
+        Button(onClick={
+            store.saveNotionDatabaseId(notionDatabaseId);integrationBusy=true
+            integrationScope.launch {
+                saveStatus=try{withContext(Dispatchers.IO){NotionApi.createTask(store.loadNotionToken(),store.loadNotionDatabaseId(),notionTask)}}
+                catch(error:Throwable){error.message ?: "Could not create Notion task."}
+                finally{integrationBusy=false}
+            }
+        },enabled=!integrationBusy&&notionTask.isNotBlank(),modifier=Modifier.fillMaxWidth()){Text("Add task to Notion")}
+        Text("Voice commands: check my unread emails; what's on my calendar; show my Notion tasks; add task to Notion buy notebooks.",color=Color(0xFF6F8BA8),fontSize=11.sp)
         Spacer(Modifier.height(12.dp))
         Text("Integrations", color = Color(0xFF8EB5DC), fontSize = 18.sp)
         Text("Google status: " + if (store.loadGoogleAccessToken().isBlank()) "Not connected" else "Connected (reconnect if token expires)", color = Color(0xFF6F8BA8), fontSize = 12.sp)
