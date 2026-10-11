@@ -156,39 +156,39 @@ jobs:
           retention-days: 7
 
       - name: Boot emulator, install and launch APK
-        timeout-minutes: 8
+        timeout-minutes: 15
         uses: reactivecircus/android-emulator-runner@v2
         with:
-          api-level: 33
-          target: google_apis
+          # API 35 successfully booted in the prior run; API 33 did not boot
+          # before the step timeout in the latest run.
+          api-level: 35
           arch: x86_64
-          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -no-snapshot -camera-back none -camera-front none
+          emulator-boot-timeout: 720
+          # The action's script does not assume its process starts in the repo.
+          working-directory: ${{ github.workspace }}
+          emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim
           disable-animations: true
-          force-avd-creation: true
           script: |
             set -eu
             echo "Emulator install working directory: $(pwd)"
-            APK="app/build/outputs/apk/debug/app-debug.apk"
+            APK="${GITHUB_WORKSPACE:?GITHUB_WORKSPACE is not set}/app/build/outputs/apk/debug/app-debug.apk"
             if [ ! -f "$APK" ]; then
-              echo "APK not found at the expected Gradle output path: $APK"
-              echo "Visible APK files from the current directory:"
-              find . -type f -name '*.apk' -print || true
-              echo "GITHUB_WORKSPACE=${GITHUB_WORKSPACE:-<unset>}"
-              if [ -n "${GITHUB_WORKSPACE:-}" ] && [ -d "$GITHUB_WORKSPACE" ]; then
-                echo "Visible APK files under GITHUB_WORKSPACE:"
-                find "$GITHUB_WORKSPACE" -type f -name '*.apk' -print || true
-              fi
+              echo "APK not found at absolute path: $APK"
+              echo "APK files in the workspace:"
+              find "$GITHUB_WORKSPACE" -type f -name '*.apk' -print || true
               exit 1
             fi
             echo "Found APK: $APK"
             PACKAGE="$("$ANDROID_HOME/cmdline-tools/latest/bin/apkanalyzer" manifest application-id "$APK")"
-            adb devices
-            timeout 45s adb install -r "$APK"
-            timeout 30s adb shell monkey -p "$PACKAGE" -c android.intent.category.LAUNCHER 1
+            DEVICE="${ANDROID_SERIAL:-emulator-5554}"
+            adb -s "$DEVICE" devices
+            adb -s "$DEVICE" wait-for-device
+            timeout 60s adb -s "$DEVICE" install -r "$APK"
+            timeout 45s adb -s "$DEVICE" shell monkey -p "$PACKAGE" -c android.intent.category.LAUNCHER 1
             sleep 5
-            if ! timeout 20s adb shell pidof "$PACKAGE"; then
+            if ! timeout 20s adb -s "$DEVICE" shell pidof "$PACKAGE"; then
               echo "Vanta did not remain running after launch. Recent Android logs:"
-              adb logcat -d -t 300 || true
+              adb -s "$DEVICE" logcat -d -t 300 || true
               exit 1
             fi
             echo "Vanta installed and remained running on the cloud emulator."
