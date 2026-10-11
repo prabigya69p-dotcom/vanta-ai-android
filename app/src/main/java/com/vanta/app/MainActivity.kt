@@ -77,14 +77,19 @@ class MainActivity : ComponentActivity() {
 
     private var pendingCameraAction: (() -> Unit)? = null
     private var pendingSpeechResult: ((String) -> Unit)? = null
+    private var pendingSpeechFailure: ((String) -> Unit)? = null
+    private var speechSessionId = 0
     private val micPermission = registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
         val callback = pendingSpeechResult
+        val failure = pendingSpeechFailure
         pendingSpeechResult = null
+        pendingSpeechFailure = null
         if (granted && callback != null) {
             WakeService.pause(this@MainActivity)
-            startListeningInternal(callback)
+            startListeningInternal(callback, failure ?: {})
         } else {
             WakeService.resume(this@MainActivity)
+            if (!granted) failure?.invoke("Microphone permission is required to use voice input.")
         }
     }
     private val cameraPermission = registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
@@ -177,51 +182,125 @@ class MainActivity : ComponentActivity() {
     }
 
     fun listen(onText: (String) -> Unit) {
-        if (!SpeechRecognizer.isRecognitionAvailable(this)) return
+        listen(onText, {})
+    }
+
+    fun listen(onText: (String) -> Unit, onFailure: (String) -> Unit) {
+        if (!SpeechRecognizer.isRecognitionAvailable(this)) {
+            WakeService.resume(this)
+            onFailure("Speech recognition isn't available on this device.")
+            return
+        }
         if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
             pendingSpeechResult = onText
+            pendingSpeechFailure = onFailure
             micPermission.launch(Manifest.permission.RECORD_AUDIO)
             return
         }
         stopSpeaking()
         WakeService.pause(this)
-        startListeningInternal(onText)
+        startListeningInternal(onText, onFailure)
     }
 
-    private fun startListeningInternal(onText: (String) -> Unit) {
-        recognizer?.destroy()
-        recognizer = SpeechRecognizer.createSpeechRecognizer(this).apply {
-            setRecognitionListener(object : RecognitionListener {
-                override fun onResults(results: Bundle) {
-                    val spoken = results.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)?.firstOrNull()
-                    recognizer?.destroy()
-                    recognizer = null
-                    WakeService.resume(this@MainActivity)
-                    spoken?.let(onText)
+    private fun startListeningInternal(
+        onText: (String) -> Unit,
+        onFailure: (String) -> Unit = {}
+    ) {
+        // Invalidate the previous listener before cancelling it; cancellation can trigger a late callback.
+        val sessionId = ++speechSessionId
+        val previousRecognizer = recognizer
+        recognizer = null
+        try { previousRecognizer?.cancel() } catch (_: RuntimeException) { }
+        try { previousRecognizer?.destroy() } catch (_: RuntimeException) { }
+
+        val currentRecognizer = try {
+            SpeechRecognizer.createSpeechRecognizer(this)
+        } catch (_: RuntimeException) {
+            WakeService.resume(this)
+            onFailure("Couldn't start speech recognition. Try again.")
+            return
+        }
+        recognizer = currentRecognizer
+        var completed = false
+        var latestPartial: String? = null
+
+        fun finish(transcript: String?, failureMessage: String? = null) {
+            if (completed || sessionId != speechSessionId) return
+            completed = true
+            if (recognizer === currentRecognizer) recognizer = null
+            try { currentRecognizer.destroy() } catch (_: RuntimeException) { }
+            WakeService.resume(this@MainActivity)
+
+            val cleanedTranscript = transcript?.trim()?.takeIf { it.isNotEmpty() }
+            if (cleanedTranscript != null) {
+                onText(cleanedTranscript)
+            } else {
+                onFailure(failureMessage ?: "I didn't catch that. Please try again.")
+            }
+        }
+
+        currentRecognizer.setRecognitionListener(object : RecognitionListener {
+            override fun onResults(results: Bundle) {
+                val finalTranscript = results
+                    .getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
+                    ?.firstOrNull { it.isNotBlank() }
+                // Some services return an empty final list after emitting a useful partial transcript.
+                finish(finalTranscript ?: latestPartial, "I didn't catch that. Please try again.")
+            }
+
+            override fun onError(error: Int) {
+                if (sessionId != speechSessionId) return
+                val message = when (error) {
+                    SpeechRecognizer.ERROR_NETWORK_TIMEOUT -> "Speech recognition timed out. Check your connection and try again."
+                    SpeechRecognizer.ERROR_NETWORK -> "Speech recognition couldn't connect. Check your internet connection."
+                    SpeechRecognizer.ERROR_AUDIO -> "Microphone audio couldn't be captured. Check microphone access."
+                    SpeechRecognizer.ERROR_SERVER -> "The speech service failed. Please try again."
+                    SpeechRecognizer.ERROR_CLIENT -> "Speech recognition was interrupted. Please try again."
+                    SpeechRecognizer.ERROR_SPEECH_TIMEOUT, SpeechRecognizer.ERROR_NO_MATCH -> "I didn't catch that. Please try again."
+                    SpeechRecognizer.ERROR_RECOGNIZER_BUSY -> "Speech recognition is busy. Try again in a moment."
+                    SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS -> "Microphone permission is required to use voice input."
+                    SpeechRecognizer.ERROR_TOO_MANY_REQUESTS -> "Too many speech requests. Wait a moment and try again."
+                    else -> "Speech recognition failed. Please try again."
                 }
-                override fun onError(error: Int) {
-                    recognizer?.destroy()
-                    recognizer = null
-                    WakeService.resume(this@MainActivity)
-                }
-                override fun onReadyForSpeech(params: Bundle) {}
-                override fun onBeginningOfSpeech() {}
-                override fun onRmsChanged(rmsdB: Float) {}
-                override fun onBufferReceived(buffer: ByteArray) {}
-                override fun onEndOfSpeech() {}
-                override fun onPartialResults(partialResults: Bundle) {}
-                override fun onEvent(eventType: Int, params: Bundle) {}
-            })
-            startListening(Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
+                finish(null, message)
+            }
+
+            override fun onPartialResults(partialResults: Bundle) {
+                if (sessionId != speechSessionId) return
+                latestPartial = partialResults
+                    .getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
+                    ?.firstOrNull { it.isNotBlank() }
+                    ?.trim()
+                    ?.takeIf { it.isNotEmpty() }
+            }
+
+            override fun onReadyForSpeech(params: Bundle) { }
+            override fun onBeginningOfSpeech() { }
+            override fun onRmsChanged(rmsdB: Float) { }
+            override fun onBufferReceived(buffer: ByteArray) { }
+            override fun onEndOfSpeech() { }
+            override fun onEvent(eventType: Int, params: Bundle) { }
+        })
+
+        try {
+            currentRecognizer.startListening(Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
                 putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
-                putExtra(RecognizerIntent.EXTRA_LANGUAGE, Locale.getDefault())
-                putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, false)
+                putExtra(RecognizerIntent.EXTRA_LANGUAGE, Locale.getDefault().toLanguageTag())
+                putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
+                putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 5)
             })
+        } catch (_: RuntimeException) {
+            finish(null, "Couldn't start speech recognition. Try again.")
         }
     }
 
     private fun stopListening() {
-        recognizer?.cancel()
+        // Ignore callbacks from a cancelled session so they cannot affect the next command.
+        speechSessionId++
+        val activeRecognizer = recognizer
+        recognizer = null
+        try { activeRecognizer?.cancel() } catch (_: RuntimeException) { }
+        try { activeRecognizer?.destroy() } catch (_: RuntimeException) { }
     }
 
     fun stopSpeaking() {
@@ -241,7 +320,7 @@ class MainActivity : ComponentActivity() {
     }
 
     override fun onDestroy() {
-        recognizer?.destroy()
+        stopListening()
         tts?.shutdown()
         super.onDestroy()
     }
@@ -500,10 +579,17 @@ private fun ChatScreen(
         }
         if (wakeQuery.isBlank()) {
             activityStatus = "Listening for your command…"
-            activity.listen { spoken ->
-                input = spoken.trim()
-                if (input.isNotBlank()) send()
-            }
+            activity.listen(
+                onText = { spoken ->
+                    input = spoken.trim()
+                    if (input.isNotBlank()) send()
+                },
+                onFailure = { failure ->
+                    activityStatus = failure
+                    messages = messages + ChatMessage(false, failure)
+                    persist()
+                }
+            )
         } else {
             input = wakeQuery.trim()
             send()
@@ -662,7 +748,19 @@ private fun ChatScreen(
                 placeholder = { Text("Message Argon") },
                 maxLines = 4
             )
-            FilledIconButton(onClick = { activity.listen { input = it; send() } }, shape = CircleShape) {
+            FilledIconButton(onClick = {
+                activity.listen(
+                    onText = { spoken ->
+                        input = spoken.trim()
+                        if (input.isNotBlank()) send()
+                    },
+                    onFailure = { failure ->
+                        activityStatus = failure
+                        messages = messages + ChatMessage(false, failure)
+                        persist()
+                    }
+                )
+            }, shape = CircleShape) {
                 Text("🎙")
             }
             FilledIconButton(onClick = ::send, shape = CircleShape, enabled = !busy) {
