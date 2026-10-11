@@ -99,12 +99,6 @@ class VantaStore(context: Context) {
 
     fun loadGitHubToken(): String = loadEncrypted("github_code_dev_token_v1")
 
-    fun saveGoogleAccessToken(value: String): Boolean = saveEncrypted("google_workspace_access_token_v1", value)
-    fun loadGoogleAccessToken(): String = loadEncrypted("google_workspace_access_token_v1")
-    fun saveNotionToken(value: String): Boolean = saveEncrypted("notion_integration_token_v1", value)
-    fun loadNotionToken(): String = loadEncrypted("notion_integration_token_v1")
-    fun saveNotionDatabaseId(value: String) { prefs.edit().putString("notion_database_id_v1", value.trim()).apply() }
-    fun loadNotionDatabaseId(): String = prefs.getString("notion_database_id_v1", "").orEmpty()
     fun saveFishAudioApiKey(value: String): Boolean =
         saveEncrypted("fish_audio_api_v1", value)
 
@@ -199,8 +193,11 @@ class VantaStore(context: Context) {
 
     fun clearChat() = prefs.edit().remove("chat").apply()
 
-    fun saveGoogleAccessToken(value: String): Boolean = saveEncrypted("google_access_token_v1", value)
-    fun loadGoogleAccessToken(): String = loadEncrypted("google_access_token_v1")
+    // OAuth authorizes private user data; the API key identifies the Cloud project only.
+    fun saveGoogleAccessToken(value: String): Boolean = saveEncrypted("google_workspace_access_token_v1", value)
+    fun loadGoogleAccessToken(): String = loadEncrypted("google_workspace_access_token_v1")
+    fun saveGoogleApiKey(value: String): Boolean = saveEncrypted("google_workspace_api_key_v1", value)
+    fun loadGoogleApiKey(): String = loadEncrypted("google_workspace_api_key_v1")
     fun saveNotionToken(value: String): Boolean = saveEncrypted("notion_integration_token_v1", value)
     fun loadNotionToken(): String = loadEncrypted("notion_integration_token_v1")
     fun saveNotionDatabaseId(value: String): Boolean = saveEncrypted("notion_database_id_v1", value)

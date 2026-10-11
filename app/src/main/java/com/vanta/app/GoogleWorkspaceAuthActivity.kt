@@ -16,7 +16,9 @@ class GoogleWorkspaceAuthActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         val request=AuthorizationRequest.builder().setRequestedScopes(listOf(
             Scope("https://www.googleapis.com/auth/gmail.modify"),
-            Scope("https://www.googleapis.com/auth/calendar.events")
+            Scope("https://www.googleapis.com/auth/gmail.send"),
+            Scope("https://www.googleapis.com/auth/calendar.events"),
+            Scope("https://www.googleapis.com/auth/tasks")
         )).build()
         Identity.getAuthorizationClient(this).authorize(request)
             .addOnSuccessListener { result ->

@@ -894,6 +894,8 @@ private fun SettingsScreen(
     var wake by remember { mutableStateOf(store.loadWakeEnabled()) }
     var saveStatus by remember { mutableStateOf("") }
     var githubToken by remember { mutableStateOf("") }
+    var googleApiKey by remember { mutableStateOf("") }
+    var googleTask by remember { mutableStateOf("") }
     var notionToken by remember { mutableStateOf("") }
     var notionDatabaseId by remember { mutableStateOf(store.loadNotionDatabaseId()) }
     var notionTask by remember { mutableStateOf("") }
@@ -984,7 +986,7 @@ private fun SettingsScreen(
         if (saveStatus.isNotBlank()) {
             Text(
                 saveStatus,
-                color = if (saveStatus.startsWith("Saved")) Color(0xFF73E6A8) else Color(0xFFFF8A8A),
+                color = if (saveStatus.contains("saved", true) || saveStatus.contains("connected", true) || saveStatus.contains("cleared", true) || saveStatus.startsWith("Added to Google Tasks:") || saveStatus.startsWith("Created Google Calendar event:") || saveStatus.startsWith("Email sent") || saveStatus.startsWith("Reply sent")) Color(0xFF73E6A8) else Color(0xFFFF8A8A),
                 fontSize = 12.sp
             )
         }
@@ -1011,67 +1013,170 @@ private fun SettingsScreen(
         Spacer(Modifier.height(18.dp))
         Divider(color = Color(0xFF20364D))
         Spacer(Modifier.height(14.dp))
-        Text("Account integrations", color = Color(0xFF8EB5DC), fontSize = 18.sp)
-        Text("Google: read-only Gmail inbox unread count and upcoming Calendar events. Notion: read tasks and add a task to the database you share.", color = Color(0xFF6F8BA8), fontSize = 11.sp)
-        Button(onClick = { activity.connectGoogleWorkspace { saveStatus = it } }, modifier = Modifier.fillMaxWidth()) { Text(if (store.loadGoogleAccessToken().isBlank()) "Connect Google Workspace" else "Reconnect Google Workspace") }
-        Button(onClick = {
-            integrationBusy = true
-            integrationScope.launch {
-                saveStatus = try { withContext(Dispatchers.IO) { GoogleWorkspaceApi.summary(store.loadGoogleAccessToken()) } }
-                catch(error:Throwable) { error.message ?: "Google check failed." }
-                finally { integrationBusy = false }
-            }
-        }, enabled = !integrationBusy, modifier = Modifier.fillMaxWidth()) { Text("Test Gmail + Calendar access") }
-        Spacer(Modifier.height(10.dp))
-        Text("Notion integration token", color = Color.White)
-        OutlinedTextField(value=notionToken,onValueChange={notionToken=it},modifier=Modifier.fillMaxWidth(),singleLine=true,label={Text("Internal integration token")},visualTransformation=PasswordVisualTransformation())
-        Text("Task database ID", color = Color.White)
-        OutlinedTextField(value=notionDatabaseId,onValueChange={notionDatabaseId=it},modifier=Modifier.fillMaxWidth(),singleLine=true,label={Text("Notion database ID")})
-        Row(horizontalArrangement=Arrangement.spacedBy(8.dp)) {
-            Button(onClick={
-                val saved=runCatching{store.saveNotionToken(notionToken)}.getOrDefault(false)
-                store.saveNotionDatabaseId(notionDatabaseId);notionToken=""
-                saveStatus=if(saved)"Notion token saved encrypted on this device." else "Could not save Notion token. Paste it and try again."
-            }) { Text("Save Notion") }
-            OutlinedButton(onClick={
-                integrationBusy=true
-                integrationScope.launch {
-                    saveStatus=try{withContext(Dispatchers.IO){NotionApi.testConnection(store.loadNotionToken())}}
-                    catch(error:Throwable){error.message ?: "Notion test failed."}
-                    finally{integrationBusy=false}
-                }
-            },enabled=!integrationBusy){Text("Test Notion")}
-        }
-        OutlinedTextField(value=notionTask,onValueChange={notionTask=it},modifier=Modifier.fillMaxWidth(),singleLine=true,label={Text("Task to add to Notion")})
-        Button(onClick={
-            store.saveNotionDatabaseId(notionDatabaseId);integrationBusy=true
-            integrationScope.launch {
-                saveStatus=try{withContext(Dispatchers.IO){NotionApi.createTask(store.loadNotionToken(),store.loadNotionDatabaseId(),notionTask)}}
-                catch(error:Throwable){error.message ?: "Could not create Notion task."}
-                finally{integrationBusy=false}
-            }
-        },enabled=!integrationBusy&&notionTask.isNotBlank(),modifier=Modifier.fillMaxWidth()){Text("Add task to Notion")}
-        Text("Voice commands: check my unread emails; what's on my calendar; show my Notion tasks; add task to Notion buy notebooks.",color=Color(0xFF6F8BA8),fontSize=11.sp)
-        Spacer(Modifier.height(12.dp))
-        Text("Integrations", color = Color(0xFF8EB5DC), fontSize = 18.sp)
-        Text("Google status: " + if (store.loadGoogleAccessToken().isBlank()) "Not connected" else "Connected (reconnect if token expires)", color = Color(0xFF6F8BA8), fontSize = 12.sp)
-        Button(onClick = { VantaIntegrations.openGoogleConnect(context) }) { Text("Connect Google account") }
-        Text("Approve only the Gmail and Calendar permissions you want Vanta to use. Access tokens expire.", color = Color(0xFF6F8BA8), fontSize = 11.sp)
-        Spacer(Modifier.height(10.dp))
-        OutlinedTextField(value = notionToken, onValueChange = { notionToken = it }, modifier = Modifier.fillMaxWidth(), label = { Text("Notion integration token") }, singleLine = true, visualTransformation = PasswordVisualTransformation())
-        OutlinedTextField(value = notionDatabaseId, onValueChange = { notionDatabaseId = it }, modifier = Modifier.fillMaxWidth(), label = { Text("Notion database ID") }, singleLine = true)
+        Text("Google Workspace", color = Color(0xFF8EB5DC), fontSize = 18.sp)
+        Text(
+            "API key status: " + if (store.loadGoogleApiKey().isBlank()) "not saved" else "saved securely on this device",
+            color = Color(0xFF6F8BA8), fontSize = 12.sp
+        )
+        OutlinedTextField(
+            value = googleApiKey,
+            onValueChange = { googleApiKey = it },
+            modifier = Modifier.fillMaxWidth(),
+            singleLine = true,
+            label = { Text("Google API key (add later)") },
+            visualTransformation = PasswordVisualTransformation()
+        )
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Button(onClick = {
+                saveStatus = if (googleApiKey.isBlank()) {
+                    "Paste a Google API key first, or use Remove key."
+                } else if (runCatching { store.saveGoogleApiKey(googleApiKey) }.getOrDefault(false)) {
+                    googleApiKey = ""
+                    "Google API key saved securely on this device."
+                } else {
+                    "Could not save the Google API key."
+                }
+            }) { Text("Save Google key") }
+            OutlinedButton(onClick = {
+                val cleared = runCatching { store.saveGoogleApiKey("") }.getOrDefault(false)
+                googleApiKey = ""
+                saveStatus = if (cleared) "Google API key cleared." else "Could not clear the Google API key."
+            }) { Text("Remove key") }
+        }
+        Text(
+            "A Google API key identifies the Cloud project; it does not grant access to private Gmail, Calendar, or Tasks data. Connect your Google account below too.",
+            color = Color(0xFF6F8BA8), fontSize = 11.sp
+        )
+        Button(
+            onClick = { VantaIntegrations.openGoogleConnect(context) },
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Text(if (store.loadGoogleAccessToken().isBlank()) "Connect Google Workspace" else "Reconnect Google Workspace")
+        }
+        Button(
+            onClick = {
+                integrationBusy = true
+                integrationScope.launch {
+                    saveStatus = try {
+                        withContext(Dispatchers.IO) {
+                            GoogleWorkspaceApi.summary(store.loadGoogleAccessToken(), store.loadGoogleApiKey())
+                        }
+                    } catch (error: Throwable) {
+                        error.message ?: "Google connection test failed."
+                    } finally {
+                        integrationBusy = false
+                    }
+                }
+            },
+            enabled = !integrationBusy,
+            modifier = Modifier.fillMaxWidth()
+        ) { Text("Test Gmail + Calendar + Tasks") }
+
+        Spacer(Modifier.height(10.dp))
+        Text("Google Tasks", color = Color.White)
+        OutlinedTextField(
+            value = googleTask,
+            onValueChange = { googleTask = it },
+            modifier = Modifier.fillMaxWidth(),
+            singleLine = true,
+            label = { Text("Task to add to Google Tasks") }
+        )
+        Button(
+            onClick = {
+                integrationBusy = true
+                integrationScope.launch {
+                    saveStatus = try {
+                        withContext(Dispatchers.IO) { VantaIntegrations.createGoogleTask(context, googleTask) }
+                    } catch (error: Throwable) {
+                        error.message ?: "Could not add Google Task."
+                    } finally {
+                        integrationBusy = false
+                    }
+                    if (saveStatus.startsWith("Added to Google Tasks:")) googleTask = ""
+                }
+            },
+            enabled = !integrationBusy && googleTask.isNotBlank(),
+            modifier = Modifier.fillMaxWidth()
+        ) { Text("Add Google Task") }
+
+        Spacer(Modifier.height(18.dp))
+        Divider(color = Color(0xFF20364D))
+        Spacer(Modifier.height(14.dp))
+        Text("Notion", color = Color(0xFF8EB5DC), fontSize = 18.sp)
+        OutlinedTextField(
+            value = notionToken,
+            onValueChange = { notionToken = it },
+            modifier = Modifier.fillMaxWidth(),
+            singleLine = true,
+            label = { Text("Notion integration token") },
+            visualTransformation = PasswordVisualTransformation()
+        )
+        OutlinedTextField(
+            value = notionDatabaseId,
+            onValueChange = { notionDatabaseId = it },
+            modifier = Modifier.fillMaxWidth(),
+            singleLine = true,
+            label = { Text("Notion database ID") }
+        )
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
             TextButton(onClick = { VantaIntegrations.openNotionHelp(context) }) { Text("Create Notion integration") }
             Button(onClick = {
                 val tokenSaved = runCatching { store.saveNotionToken(notionToken) }.getOrDefault(false)
                 val dbSaved = runCatching { store.saveNotionDatabaseId(notionDatabaseId) }.getOrDefault(false)
-                if (tokenSaved && dbSaved) { notionToken = ""; saveStatus = "Notion connection saved securely on this device." }
-                else saveStatus = "Could not save Notion settings."
+                if (tokenSaved && dbSaved) {
+                    notionToken = ""
+                    saveStatus = "Notion settings saved securely on this device."
+                } else {
+                    saveStatus = "Could not save Notion settings."
+                }
             }) { Text("Save Notion") }
+            OutlinedButton(
+                onClick = {
+                    integrationBusy = true
+                    integrationScope.launch {
+                        saveStatus = try {
+                            withContext(Dispatchers.IO) { NotionApi.testConnection(store.loadNotionToken()) }
+                        } catch (error: Throwable) {
+                            error.message ?: "Notion test failed."
+                        } finally {
+                            integrationBusy = false
+                        }
+                    }
+                },
+                enabled = !integrationBusy
+            ) { Text("Test") }
         }
-        Text("Share the target database with your Notion integration before asking Argon to read it.", color = Color(0xFF6F8BA8), fontSize = 11.sp)
-        Spacer(Modifier.height(18.dp))
-        Divider(color = Color(0xFF20364D))
+        OutlinedTextField(
+            value = notionTask,
+            onValueChange = { notionTask = it },
+            modifier = Modifier.fillMaxWidth(),
+            singleLine = true,
+            label = { Text("Task to add to Notion") }
+        )
+        Button(
+            onClick = {
+                store.saveNotionDatabaseId(notionDatabaseId)
+                integrationBusy = true
+                integrationScope.launch {
+                    saveStatus = try {
+                        withContext(Dispatchers.IO) {
+                            NotionApi.createTask(store.loadNotionToken(), store.loadNotionDatabaseId(), notionTask)
+                        }
+                    } catch (error: Throwable) {
+                        error.message ?: "Could not create Notion task."
+                    } finally {
+                        integrationBusy = false
+                    }
+                }
+            },
+            enabled = !integrationBusy && notionTask.isNotBlank(),
+            modifier = Modifier.fillMaxWidth()
+        ) { Text("Add task to Notion") }
+
+        Text(
+            "Voice commands: check my email; what's on my calendar; show my Google Tasks; add Google task buy notebooks; send email to person@example.com subject Hello body Your message; reply to latest email with Thanks; schedule calendar event Project meeting on 2026-10-12 from 15:00 to 16:00.",
+            color = Color(0xFF6F8BA8), fontSize = 11.sp
+        )
         Spacer(Modifier.height(12.dp))
         Text("Code Dev Mode", color = Color(0xFF8EB5DC), fontSize = 18.sp)
         Text(
