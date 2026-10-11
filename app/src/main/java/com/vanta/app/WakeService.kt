@@ -109,6 +109,9 @@ class WakeService : Service() {
                             startActivity(Intent(this@WakeService, MainActivity::class.java)
                                 .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP)
                                 .putExtra("wake_query", query))
+                            // Release the wake lockout. MainActivity pauses this service when it starts command capture/TTS.
+                            handlingWake = false
+                            scheduleListen(1200)
                         } catch (_: Exception) {
                             handlingWake = false
                             scheduleListen(1200)
