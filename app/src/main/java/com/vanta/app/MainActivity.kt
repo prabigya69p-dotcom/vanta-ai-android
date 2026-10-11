@@ -736,6 +736,12 @@ private fun SettingsScreen(
     var saveStatus by remember { mutableStateOf("") }
     var githubToken by remember { mutableStateOf("") }
     val context = LocalContext.current
+    val wakePermissionLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+        wake = granted
+        store.saveWakeEnabled(granted)
+        if (granted) WakeService.start(context) else WakeService.stop(context)
+        saveStatus = if (granted) "Argon hands-free enabled" else "Microphone permission is required for Argon hands-free"
+    }
 
     Column(
         Modifier
@@ -778,13 +784,21 @@ private fun SettingsScreen(
             }
             Switch(
                 checked = wake,
-                onCheckedChange = {
-                    wake = it
-                    store.saveWakeEnabled(it)
-                    if (it) {
-                        if (ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) {
-                            WakeService.start(context)
-                        }
+                onCheckedChange = { enabled ->
+                    if (!enabled) {
+                        wake = false
+                        store.saveWakeEnabled(false)
+                        WakeService.stop(context)
+                        saveStatus = "Argon hands-free disabled"
+                    } else if (ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) {
+                        wake = true
+                        store.saveWakeEnabled(true)
+                        WakeService.start(context)
+                        saveStatus = "Argon hands-free enabled; keep its notification active"
+                    } else {
+                        wakePermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+                    }
+                }
                     } else {
                         WakeService.stop(context)
                     }
