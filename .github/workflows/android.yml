@@ -1,5 +1,9 @@
 name: Vanta Full Test Suite
 
+concurrency:
+  group: vanta-full-test-${{ github.ref }}
+  cancel-in-progress: true
+
 on:
   workflow_dispatch:
   push:
@@ -33,55 +37,76 @@ jobs:
             }
           }')
 
-          CODE=000
-          CURL_EXIT=0
-          for attempt in 1 2 3 4; do
-            echo "Gemini API request attempt $attempt/4..."
-            rm -f /tmp/gemini.json
-            set +e
-            CODE=$(curl -sS --connect-timeout 20 --max-time 90 \
-              -o /tmp/gemini.json -w '%{http_code}' \
-              -X POST 'https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent' \
-              -H "x-goog-api-key: $GOOGLE_API_KEY" \
-              -H 'Content-Type: application/json' \
-              -d "$PAYLOAD")
-            CURL_EXIT=$?
-            set -e
+          PRIMARY_MODEL="gemini-3.8-flash"
+          MODEL_USED=""
 
-            if [ "$CODE" = "200" ]; then
+          request_gemini() {
+            local model="$1"
+            local max_attempts="$2"
+            CODE=000
+            CURL_EXIT=0
+            for attempt in $(seq 1 "$max_attempts"); do
+              echo "Gemini API request: $model attempt $attempt/$max_attempts..."
+              rm -f /tmp/gemini.json
+              set +e
+              CODE=$(curl -sS --connect-timeout 20 --max-time 90 \
+                -o /tmp/gemini.json -w '%{http_code}' \
+                -X POST "https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent" \
+                -H "x-goog-api-key: $GOOGLE_API_KEY" \
+                -H 'Content-Type: application/json' \
+                -d "$PAYLOAD")
+              CURL_EXIT=$?
+              set -e
+
+              if [ "$CODE" = "200" ]; then
+                MODEL_USED="$model"
+                return 0
+              fi
+
+              # Back off only for transient transport, rate-limit and server errors.
+              if { [ "$CODE" = "000" ] || [ "$CODE" = "429" ] || [[ "$CODE" =~ ^5[0-9][0-9]$ ]]; } && [ "$attempt" -lt "$max_attempts" ]; then
+                WAIT=$((attempt * 15))
+                echo "Transient Gemini failure (HTTP $CODE, curl exit $CURL_EXIT); retrying in ${WAIT}s."
+                sleep "$WAIT"
+                continue
+              fi
               break
-            fi
+            done
+            return 1
+          }
 
-            # Retry network timeouts, rate limits and server-side errors only.
-            # Do not hide invalid-key, invalid-model or malformed-request errors.
-            if { [ "$CODE" = "000" ] || [ "$CODE" = "429" ] || [[ "$CODE" =~ ^5[0-9][0-9]$ ]]; } && [ "$attempt" -lt 4 ]; then
-              WAIT=$((attempt * 10))
-              echo "Transient Gemini failure (HTTP $CODE, curl exit $CURL_EXIT); retrying in ${WAIT}s."
-              sleep "$WAIT"
-              continue
+          if ! request_gemini "$PRIMARY_MODEL" 5; then
+            PRIMARY_CODE="$CODE"
+            PRIMARY_CURL_EXIT="$CURL_EXIT"
+            # A successful fallback proves the credential/API works without hiding
+            # authentication, permission, model-name or malformed-request failures.
+            if [ "$PRIMARY_CODE" = "000" ] || [ "$PRIMARY_CODE" = "429" ] || [[ "$PRIMARY_CODE" =~ ^5[0-9][0-9]$ ]]; then
+              echo "::warning::${PRIMARY_MODEL} is temporarily unavailable (HTTP $PRIMARY_CODE); checking the same key with Gemini 3.5 Flash-Lite."
+              if ! request_gemini "gemini-3.5-flash-lite" 3; then
+                echo "Gemini API failed for both the configured model and fallback: HTTP $CODE, curl exit $CURL_EXIT."
+                if [ -s /tmp/gemini.json ]; then
+                  jq -c '{error: {code: .error.code, status: .error.status, message: .error.message}}' /tmp/gemini.json 2>/dev/null | head -c 800 || head -c 800 /tmp/gemini.json || true
+                fi
+                exit 1
+              fi
+            else
+              echo "Gemini API failed: HTTP $PRIMARY_CODE, curl exit $PRIMARY_CURL_EXIT."
+              if [ -s /tmp/gemini.json ]; then
+                jq -c '{error: {code: .error.code, status: .error.status, message: .error.message}}' /tmp/gemini.json 2>/dev/null | head -c 800 || head -c 800 /tmp/gemini.json || true
+              fi
+              if [ "$PRIMARY_CODE" = "401" ] || [ "$PRIMARY_CODE" = "403" ]; then
+                echo "Check GOOGLE_API_KEY and whether Gemini API access is enabled for that key."
+              fi
+              exit 1
             fi
-            break
-          done
-
-          if [ "$CODE" != "200" ]; then
-            echo "Gemini API failed after $attempt attempt(s): HTTP $CODE, curl exit $CURL_EXIT."
-            if [ -s /tmp/gemini.json ]; then
-              jq -c '{error: {code: .error.code, status: .error.status, message: .error.message}}' /tmp/gemini.json 2>/dev/null | head -c 800 || head -c 800 /tmp/gemini.json || true
-            fi
-            if [ "$CODE" = "000" ]; then
-              echo "No HTTP response was received. Check transient network/API availability; this does not by itself mean the key is invalid."
-            elif [ "$CODE" = "401" ] || [ "$CODE" = "403" ]; then
-              echo "Check GOOGLE_API_KEY and whether Gemini API access is enabled for that key."
-            fi
-            exit 1
           fi
 
           if ! jq -e '[.candidates[0].content.parts[]?.text // empty] | join("") | length > 0' /tmp/gemini.json >/dev/null; then
-            echo "Gemini returned HTTP 200 but no assistant text."
+            echo "Gemini returned HTTP 200 but no assistant text (model: $MODEL_USED)."
             jq -c '{error, promptFeedback, candidates}' /tmp/gemini.json 2>/dev/null | head -c 1000 || true
             exit 1
           fi
-          echo "Gemini API passed: gemini-3.8-flash returned assistant text."
+          echo "Gemini API passed: $MODEL_USED returned assistant text."
   nvidia-nim:
     name: Test NVIDIA NIM / GLM
     runs-on: ubuntu-latest
