@@ -3,6 +3,8 @@ package com.vanta.app
 import android.content.Context
 import android.util.Base64
 import java.security.KeyStore
+import android.security.keystore.KeyGenParameterSpec
+import android.security.keystore.KeyProperties
 import javax.crypto.Cipher
 import javax.crypto.KeyGenerator
 import javax.crypto.spec.GCMParameterSpec
@@ -19,7 +21,16 @@ class VantaStore(context: Context) {
         var ks = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
         if (!ks.containsAlias(alias)) {
             val generator = KeyGenerator.getInstance("AES", "AndroidKeyStore")
-            generator.init(256)
+            generator.init(
+                KeyGenParameterSpec.Builder(
+                    alias,
+                    KeyProperties.PURPOSE_ENCRYPT or KeyProperties.PURPOSE_DECRYPT
+                )
+                    .setBlockModes(KeyProperties.BLOCK_MODE_GCM)
+                    .setEncryptionPaddings(KeyProperties.ENCRYPTION_PADDING_NONE)
+                    .setKeySize(256)
+                    .build()
+            )
             generator.generateKey()
             // Reload the keystore after generation so the new alias is visible
             // on Android implementations that cache the loaded keystore.
