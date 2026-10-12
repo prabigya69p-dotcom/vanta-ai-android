@@ -12,7 +12,7 @@ jobs:
   gemini-api:
     name: Test Gemini API
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 10
     steps:
       - name: Send a minimal prompt to Gemini
         env:
@@ -35,11 +35,11 @@ jobs:
 
           CODE=000
           CURL_EXIT=0
-          for attempt in 1 2 3; do
-            echo "Gemini API request attempt $attempt/3..."
+          for attempt in 1 2 3 4; do
+            echo "Gemini API request attempt $attempt/4..."
             rm -f /tmp/gemini.json
             set +e
-            CODE=$(curl -sS --connect-timeout 15 --max-time 45 \
+            CODE=$(curl -sS --connect-timeout 20 --max-time 90 \
               -o /tmp/gemini.json -w '%{http_code}' \
               -X POST 'https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent' \
               -H "x-goog-api-key: $GOOGLE_API_KEY" \
@@ -52,9 +52,10 @@ jobs:
               break
             fi
 
-            # Retry only transient network, rate-limit, and server failures.
-            if { [ "$CODE" = "000" ] || [ "$CODE" = "429" ] || [[ "$CODE" =~ ^5[0-9][0-9]$ ]]; } && [ "$attempt" -lt 3 ]; then
-              WAIT=$((attempt * 5))
+            # Retry network timeouts, rate limits and server-side errors only.
+            # Do not hide invalid-key, invalid-model or malformed-request errors.
+            if { [ "$CODE" = "000" ] || [ "$CODE" = "429" ] || [[ "$CODE" =~ ^5[0-9][0-9]$ ]]; } && [ "$attempt" -lt 4 ]; then
+              WAIT=$((attempt * 10))
               echo "Transient Gemini failure (HTTP $CODE, curl exit $CURL_EXIT); retrying in ${WAIT}s."
               sleep "$WAIT"
               continue

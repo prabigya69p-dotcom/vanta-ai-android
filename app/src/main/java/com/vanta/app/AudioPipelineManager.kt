@@ -85,11 +85,19 @@ class AudioPipelineManager(
 
     fun markProcessing() = requestPause(AudioStateManager.PROCESSING)
 
-    /** Explicit recovery after failed ASR or completed non-TTS playback. */
+    /** Explicit recovery after failed ASR or completed non-TTS playback.
+     * Wait for a cancelled capture job to release AudioRecord before starting the next one.
+     */
     fun resumeListening() {
         if (closed) return
-        state.set(AudioStateManager.IDLE_LISTENING)
-        startListening()
+        state.set(AudioStateManager.PROCESSING)
+        synchronized(lock) { listenJob?.cancel() }
+        scope.launch(Dispatchers.IO) {
+            awaitPaused()
+            if (closed) return@launch
+            state.set(AudioStateManager.IDLE_LISTENING)
+            startListening()
+        }
     }
 
     /** The automatic TTS resume path: only onDone should call this method. */
