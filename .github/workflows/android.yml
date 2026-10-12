@@ -220,6 +220,15 @@ jobs:
           GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
         run: gradle testDebugUnitTest assembleDebug --stacktrace
 
+      - name: Print debug signing SHA-1 fingerprint
+        run: |
+          if [ -f "$HOME/.android/debug.keystore" ]; then
+            keytool -list -v -keystore "$HOME/.android/debug.keystore" -storepass android -alias androiddebugkey | grep -E 'Alias name:|SHA1:'
+          else
+            echo "Debug keystore not found; Gradle may not have generated it."
+            exit 1
+          fi
+
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
