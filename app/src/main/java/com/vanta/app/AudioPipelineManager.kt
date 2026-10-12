@@ -13,6 +13,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -109,6 +110,7 @@ class AudioPipelineManager(
     private suspend fun listenLoop() {
         var localRecord: AudioRecord? = null
         var detected = false
+        var retryAfterFailure = false
         try {
             val engine = getOrCreatePorcupine()
             if (closed || state.get() != AudioStateManager.IDLE_LISTENING) return
@@ -173,6 +175,9 @@ class AudioPipelineManager(
             ) {
                 state.set(AudioStateManager.PROCESSING)
                 val detail = error.message?.take(180) ?: "Unknown wake detector error"
+                retryAfterFailure = !detail.contains("PICOVOICE_ACCESS_KEY is missing", ignoreCase = true) &&
+                    !detail.contains("access key", ignoreCase = true) &&
+                    !detail.contains("did not create the Hey Argon model", ignoreCase = true)
                 withContext(Dispatchers.Main.immediate) {
                     onStatus("Hey Argon detector unavailable: $detail")
                 }
@@ -185,6 +190,13 @@ class AudioPipelineManager(
             withContext(Dispatchers.Main.immediate) {
                 onStatus("Argon heard you — opening VANTA")
                 onWakeWord()
+            }
+        } else if (retryAfterFailure && !closed) {
+            scope.launch(Dispatchers.IO) {
+                delay(5000)
+                if (!closed && state.compareAndSet(AudioStateManager.PROCESSING, AudioStateManager.IDLE_LISTENING)) {
+                    startListening()
+                }
             }
         }
     }

@@ -33,8 +33,14 @@ object GoogleWorkspaceApi {
             val status = c.responseCode
             val body = (if (status in 200..299) c.inputStream else c.errorStream)
                 ?.bufferedReader()?.use { it.readText() }.orEmpty()
-            if (status == 401 || status == 403) {
-                throw IOException("Google access expired or permission is missing. Reconnect Google Workspace in VANTA Settings.")
+            if (status == 401) {
+                throw IOException("Google access token expired. Reconnect Google Workspace in VANTA Settings.")
+            }
+            if (status == 403) {
+                val detail = runCatching { JSONObject(body).optJSONObject("error")?.optString("message").orEmpty() }
+                    .getOrDefault("").take(160)
+                throw IOException("Google denied access (HTTP 403). Check OAuth scopes and that Gmail, Calendar and Tasks APIs are enabled." +
+                    if (detail.isBlank()) "" else " " + detail)
             }
             if (status !in 200..299) {
                 val detail = runCatching { JSONObject(body).optJSONObject("error")?.optString("message").orEmpty() }

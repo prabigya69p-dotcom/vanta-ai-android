@@ -207,6 +207,7 @@ class VantaStore(context: Context) {
     // OAuth authorizes private user data; the API key identifies the Cloud project only.
     fun saveGoogleAccessToken(value: String): Boolean = saveEncrypted("google_workspace_access_token_v1", value)
     fun loadGoogleAccessToken(): String = loadEncrypted("google_workspace_access_token_v1")
+    fun clearGoogleAccessToken(): Boolean = saveEncrypted("google_workspace_access_token_v1", "")
     fun saveGoogleApiKey(value: String): Boolean = saveEncrypted("google_workspace_api_key_v1", value)
     fun loadGoogleApiKey(): String = loadEncrypted("google_workspace_api_key_v1")
     fun saveNotionToken(value: String): Boolean = saveEncrypted("notion_integration_token_v1", value)

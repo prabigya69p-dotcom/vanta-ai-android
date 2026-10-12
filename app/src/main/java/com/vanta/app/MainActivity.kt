@@ -1,6 +1,7 @@
 package com.vanta.app
 
 import android.Manifest
+import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
@@ -134,6 +135,18 @@ class MainActivity : ComponentActivity() {
         super.onNewIntent(intent)
         setIntent(intent)
         handleIncomingIntent(intent)
+    }
+
+    override fun onResume() {
+        super.onResume()
+        if (::store.isInitialized &&
+            store.loadWakeEnabled() &&
+            AssistantForegroundService.instance == null &&
+            ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) ==
+                PackageManager.PERMISSION_GRANTED
+        ) {
+            WakeService.start(this)
+        }
     }
 
     private fun handleIncomingIntent(intent: Intent) {
@@ -921,6 +934,8 @@ private fun SettingsScreen(
     var temporary by remember { mutableStateOf(store.loadTemporaryChat()) }
     var wake by remember { mutableStateOf(store.loadWakeEnabled()) }
     var saveStatus by remember { mutableStateOf("") }
+    var showPermissions by remember { mutableStateOf(false) }
+    var googleConnected by remember { mutableStateOf(store.loadGoogleAccessToken().isNotBlank()) }
     var githubToken by remember { mutableStateOf("") }
     var googleTask by remember { mutableStateOf("") }
     var notionToken by remember { mutableStateOf("") }
@@ -936,6 +951,11 @@ private fun SettingsScreen(
         saveStatus = if (granted) "Argon hands-free enabled" else "Microphone permission is required for Argon hands-free"
     }
 
+    if (showPermissions) {
+        PermissionsScreen(store, activity) { showPermissions = false }
+        return
+    }
+
     Column(
         Modifier
             .fillMaxSize()
@@ -944,6 +964,9 @@ private fun SettingsScreen(
             .padding(20.dp)
     ) {
         Text("VANTA Settings", fontSize = 25.sp, color = Color.White)
+        Button(onClick = { showPermissions = true }, modifier = Modifier.fillMaxWidth()) {
+            Text("Permissions & access")
+        }
         Spacer(Modifier.height(16.dp))
 
         Spacer(Modifier.height(12.dp))
@@ -1042,20 +1065,26 @@ private fun SettingsScreen(
         Spacer(Modifier.height(14.dp))
         Text("Google Workspace", color = Color(0xFF8EB5DC), fontSize = 18.sp)
         Text(
-            "Google API key is configured in the app build. Connect your Google account to authorize private Gmail, Calendar, and Tasks data.",
+            "Google API key: " + (if (GoogleWorkspaceApi.API_KEY.isNotBlank()) "configured. " else "not configured. ") +
+                "Sign in to authorize private Gmail, Calendar, and Tasks data.",
             color = Color(0xFF6F8BA8), fontSize = 11.sp
         )
         Button(
-            onClick = { VantaIntegrations.openGoogleConnect(context) },
+            onClick = {
+                activity.connectGoogleWorkspace { status ->
+                    googleConnected = store.loadGoogleAccessToken().isNotBlank()
+                    saveStatus = status
+                }
+            },
             modifier = Modifier.fillMaxWidth()
         ) {
-            Text(if (store.loadGoogleAccessToken().isBlank()) "Connect Google Workspace" else "Reconnect Google Workspace")
+            Text(if (googleConnected) "Reconnect Google Workspace" else "Connect Google Workspace")
         }
         Button(
             onClick = {
                 integrationBusy = true
                 integrationScope.launch {
-                    saveStatus = try {
+                    val result = try {
                         withContext(Dispatchers.IO) {
                             GoogleWorkspaceApi.summary(store.loadGoogleAccessToken(), GoogleWorkspaceApi.API_KEY)
                         }
@@ -1063,6 +1092,16 @@ private fun SettingsScreen(
                         error.message ?: "Google connection test failed."
                     } finally {
                         integrationBusy = false
+                    }
+                    if (result.contains("Google access token expired", ignoreCase = true) ||
+                        result.contains("Google authorization expired", ignoreCase = true)
+                    ) {
+                        store.clearGoogleAccessToken()
+                        googleConnected = false
+                        saveStatus = "Google authorization expired. Reconnect Google Workspace and approve the requested access."
+                    } else {
+                        googleConnected = store.loadGoogleAccessToken().isNotBlank()
+                        saveStatus = result
                     }
                 }
             },
@@ -1368,4 +1407,119 @@ private fun decodeImageReference(value: String): Bitmap? {
             URL(value).openStream().use { BitmapFactory.decodeStream(it) }
         }
     }.getOrNull()
+}
+
+@Composable
+private fun PermissionsScreen(store: VantaStore, activity: MainActivity, onBack: () -> Unit) {
+    val context = LocalContext.current
+    var refresh by remember { mutableIntStateOf(0) }
+    var googleStatus by remember { mutableStateOf(if (store.loadGoogleAccessToken().isBlank()) "Not connected" else "Authorization saved; may expire") }
+    val mic = ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED
+    val camera = ContextCompat.checkSelfPermission(context, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED
+    val notifications = android.os.Build.VERSION.SDK_INT < 33 ||
+        ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED
+    val overlay = Settings.canDrawOverlays(context)
+    val notificationAccess = NotificationDigestService.hasAccess(context)
+    val power = context.getSystemService(Context.POWER_SERVICE) as android.os.PowerManager
+    val batteryExempt = power.isIgnoringBatteryOptimizations(context.packageName)
+    val accessibility = Settings.Secure.getString(context.contentResolver, Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES)
+        .orEmpty().split(':').any { ComponentName.unflattenFromString(it) == ComponentName(context, ArgonAccessibilityService::class.java) } &&
+        Settings.Secure.getInt(context.contentResolver, Settings.Secure.ACCESSIBILITY_ENABLED, 0) == 1
+    val wake = store.loadWakeEnabled()
+    val wakeKey = BuildConfig.PICOVOICE_ACCESS_KEY.isNotBlank()
+    val listenerStatus = AssistantForegroundService.latestStatus
+    val micLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { refresh++ }
+    val cameraLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { refresh++ }
+    val notificationLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { refresh++ }
+    fun appSettings() {
+        runCatching { context.startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
+            data = Uri.parse("package:" + context.packageName); addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        }) }
+    }
+    fun specialSettings(action: String) {
+        runCatching { context.startActivity(Intent(action).apply {
+            data = Uri.parse("package:" + context.packageName); addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        }) }.onFailure { appSettings() }
+    }
+    Column(Modifier.fillMaxSize().background(Color(0xFF080F1A)).verticalScroll(rememberScrollState()).padding(20.dp)) {
+        Text("Permissions & access", fontSize = 24.sp, color = Color.White)
+        Text("Permission status and shortcuts to Android settings.", color = Color(0xFF8EA8C3), fontSize = 12.sp)
+        Text("Refresh state: $refresh", color = Color(0xFF6F8BAF), fontSize = 10.sp)
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            OutlinedButton(onClick = onBack) { Text("Back") }
+            OutlinedButton(onClick = { refresh++ }) { Text("Refresh status") }
+        }
+        Spacer(Modifier.height(12.dp))
+        Text("VOICE & HANDS-FREE", color = Color(0xFF71C2FF), fontSize = 13.sp)
+        PermissionStatusRow("Microphone", "Voice input and Hey Argon detection.", if (mic) "Granted" else "Not granted",
+            if (mic) "Manage" else "Grant", { if (mic) appSettings() else micLauncher.launch(Manifest.permission.RECORD_AUDIO) })
+        PermissionStatusRow("Hey Argon wake engine",
+            if (!wakeKey) "PICOVOICE_ACCESS_KEY is missing from this APK." else "Local detection runs when hands-free is enabled.",
+            when { !wake -> "Off"; !mic -> "Needs microphone"; !wakeKey -> "Not configured"; else -> listenerStatus },
+            if (wake) "Restart" else "Enable", {
+                if (!mic) micLauncher.launch(Manifest.permission.RECORD_AUDIO) else {
+                    store.saveWakeEnabled(true); WakeService.start(context); refresh++
+                }
+            })
+        PermissionStatusRow("Overlay / floating status", "Allows Argon's status pill over other apps.", if (overlay) "Granted" else "Not granted",
+            "Open settings", { specialSettings(Settings.ACTION_MANAGE_OVERLAY_PERMISSION) })
+        PermissionStatusRow("Battery optimization", "Exemption may improve background listening; Android may still restrict it.",
+            if (batteryExempt) "Exempt" else "Optimized", if (batteryExempt) "Manage" else "Allow", {
+                if (batteryExempt) specialSettings(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS)
+                else specialSettings(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS)
+            })
+        Spacer(Modifier.height(8.dp))
+        Text("DEVICE ACCESS", color = Color(0xFF71C2FF), fontSize = 13.sp)
+        PermissionStatusRow("Camera", "Used for camera attachments.", if (camera) "Granted" else "Not granted",
+            if (camera) "Manage" else "Grant", { if (camera) appSettings() else cameraLauncher.launch(Manifest.permission.CAMERA) })
+        PermissionStatusRow("Notifications", "Service/reminder notifications on Android 13+.", if (notifications) "Granted" else "Not granted",
+            if (!notifications && android.os.Build.VERSION.SDK_INT >= 33) "Grant" else "Manage", {
+                if (!notifications && android.os.Build.VERSION.SDK_INT >= 33) notificationLauncher.launch(Manifest.permission.POST_NOTIFICATIONS) else appSettings()
+            })
+        PermissionStatusRow("Notification listener", "Optional email/calendar notification groups and missed-call alerts.",
+            if (notificationAccess) "Enabled" else "Not enabled", "Open settings", { NotificationDigestService.openAccessSettings(context) })
+        PermissionStatusRow("Accessibility controls", "Optional user-enabled screen-control access.",
+            if (accessibility) "Enabled" else "Not enabled", "Open settings", { ArgonAccessibilityService.openAccessibilitySettings(context) })
+        PermissionStatusRow("Internet", "Required for AI and Google APIs.", "Granted automatically")
+        PermissionStatusRow("Wake lock", "Helps hold the CPU awake while listening.", "Granted automatically")
+        PermissionStatusRow("Run after reboot", "Android may restrict microphone services from starting at boot.", "Granted automatically")
+        PermissionStatusRow("Foreground microphone service", "Ongoing notification while listening.", "Declared in manifest")
+        Spacer(Modifier.height(8.dp))
+        Text("GOOGLE WORKSPACE", color = Color(0xFF71C2FF), fontSize = 13.sp)
+        PermissionStatusRow("Gmail, Calendar & Tasks", "Private data needs Google account consent; API key alone cannot grant access.",
+            if (store.loadGoogleAccessToken().isBlank()) "Not connected" else googleStatus,
+            if (store.loadGoogleAccessToken().isBlank()) "Connect" else "Reconnect", {
+                activity.connectGoogleWorkspace { status ->
+                    googleStatus = if (store.loadGoogleAccessToken().isBlank()) status else "Authorization saved; may expire"
+                }
+            })
+        Spacer(Modifier.height(12.dp))
+        Button(onClick = {
+            if (!mic) micLauncher.launch(Manifest.permission.RECORD_AUDIO)
+            else if (!wakeKey) googleStatus = "Wake engine setup is missing: add PICOVOICE_ACCESS_KEY to GitHub Actions secrets, then rebuild."
+            else { store.saveWakeEnabled(true); WakeService.start(context); refresh++ }
+        }, modifier = Modifier.fillMaxWidth()) { Text("Check / restart Hey Argon listener") }
+        Text("Listener status: $listenerStatus", color = Color(0xFF8EA8C3), fontSize = 12.sp)
+        if (googleStatus.startsWith("Wake engine setup is missing")) Text(googleStatus, color = Color(0xFFFF8A8A), fontSize = 12.sp)
+        Spacer(Modifier.height(20.dp))
+    }
+}
+
+@Composable
+private fun PermissionStatusRow(title: String, detail: String, status: String, actionLabel: String? = null, onAction: (() -> Unit)? = null) {
+    Column(Modifier.fillMaxWidth().padding(vertical = 7.dp)) {
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f)) {
+                Text(title, color = Color.White, fontSize = 14.sp)
+                Text(detail, color = Color(0xFF8EA8C3), fontSize = 11.sp)
+            }
+            Spacer(Modifier.width(8.dp))
+            Text(status, color = if (status.contains("granted", true) || status.contains("enabled", true) ||
+                status.contains("exempt", true) || status.contains("configured", true) || status.contains("listening", true) ||
+                status.contains("connected", true) || status.contains("automatically", true) || status.contains("declared", true))
+                Color(0xFF73E6A8) else Color(0xFFFFC278), fontSize = 11.sp)
+        }
+        if (actionLabel != null && onAction != null) TextButton(onClick = onAction) { Text(actionLabel) }
+        Divider(color = Color(0xFF20364D))
+    }
 }

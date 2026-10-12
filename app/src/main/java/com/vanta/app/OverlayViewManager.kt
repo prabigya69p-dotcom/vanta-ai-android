@@ -19,9 +19,12 @@ class OverlayViewManager(context: Context) {
     private var view: TextView? = null
     private val hideRunnable = Runnable { removeViewNow() }
 
-    fun show(status: String = "Argon heard you") {
+    fun show(status: String = "Argon heard you", onVisible: ((Boolean) -> Unit)? = null) {
         mainHandler.post {
-            if (!Settings.canDrawOverlays(appContext)) return@post
+            if (!Settings.canDrawOverlays(appContext)) {
+                onVisible?.invoke(false)
+                return@post
+            }
             var label = view
             if (label == null) {
                 label = createView()
@@ -42,12 +45,15 @@ class OverlayViewManager(context: Context) {
                     windowManager.addView(label, params)
                     view = label
                 } catch (_: SecurityException) {
+                    onVisible?.invoke(false)
                     return@post
                 } catch (_: WindowManager.BadTokenException) {
+                    onVisible?.invoke(false)
                     return@post
                 }
             }
             label.text = status
+            onVisible?.invoke(true)
             mainHandler.removeCallbacks(hideRunnable)
             mainHandler.postDelayed(hideRunnable, 2800L)
         }

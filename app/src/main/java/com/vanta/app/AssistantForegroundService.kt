@@ -4,6 +4,7 @@ import android.Manifest
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
+import android.app.PendingIntent
 import android.app.Service
 import android.content.Context
 import android.content.Intent
@@ -43,6 +44,10 @@ class AssistantForegroundService : Service(), TextToSpeech.OnInitListener {
 
         @Volatile
         internal var instance: AssistantForegroundService? = null
+            private set
+
+        @Volatile
+        internal var latestStatus: String = "Not running"
             private set
 
         fun speak(context: Context, text: String) {
@@ -162,20 +167,23 @@ class AssistantForegroundService : Service(), TextToSpeech.OnInitListener {
     }
 
     private fun onWakeWordDetected() {
-        overlay.show("Hey Argon — ready")
-        updateNotification("Argon activated. Listening for your command.")
-        val intent = Intent(this, MainActivity::class.java)
-            .addFlags(
-                Intent.FLAG_ACTIVITY_NEW_TASK or
-                    Intent.FLAG_ACTIVITY_SINGLE_TOP or
-                    Intent.FLAG_ACTIVITY_CLEAR_TOP
-            )
-            .putExtra("wake_query", "")
-        try {
-            startActivity(intent)
-        } catch (_: RuntimeException) {
-            updateNotification("Argon detected. Open VANTA to give a command.")
-            // Stay paused until VANTA is opened; do not resume into accidental capture.
+        updateNotification("Hey Argon detected — preparing VANTA…")
+        // Android may restrict activity launches from a background microphone service.
+        // Wait until the overlay is actually attached; otherwise use a tappable notification.
+        overlay.show("Hey Argon — ready") { visible ->
+            if (!visible) {
+                updateNotification("Hey Argon detected — tap this notification to give a command.")
+                return@show
+            }
+            val intent = Intent(this, MainActivity::class.java)
+                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP)
+                .putExtra("wake_query", "")
+            try {
+                startActivity(intent)
+                updateNotification("Hey Argon detected — tap this notification if VANTA doesn't open.")
+            } catch (_: RuntimeException) {
+                updateNotification("Hey Argon detected — tap this notification to give a command.")
+            }
         }
     }
 
@@ -242,17 +250,26 @@ class AssistantForegroundService : Service(), TextToSpeech.OnInitListener {
         ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) ==
             PackageManager.PERMISSION_GRANTED
 
-    private fun buildNotification(message: String): Notification =
-        NotificationCompat.Builder(this, CHANNEL_ID)
+    private fun buildNotification(message: String): Notification {
+        val openIntent = Intent(this, MainActivity::class.java).apply {
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP)
+            putExtra("wake_query", "")
+        }
+        val pending = PendingIntent.getActivity(this, 4402, openIntent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
+        return NotificationCompat.Builder(this, CHANNEL_ID)
             .setSmallIcon(android.R.drawable.ic_btn_speak_now)
             .setContentTitle("VANTA · Hey Argon")
             .setContentText(message)
+            .setContentIntent(pending)
             .setOngoing(true)
             .setCategory(NotificationCompat.CATEGORY_SERVICE)
             .setOnlyAlertOnce(true)
             .build()
+    }
 
     private fun updateNotification(message: String) {
+        latestStatus = message
         val manager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
         manager.notify(NOTIFICATION_ID, buildNotification(message))
     }
@@ -268,6 +285,7 @@ class AssistantForegroundService : Service(), TextToSpeech.OnInitListener {
 
     override fun onDestroy() {
         if (instance === this) instance = null
+        latestStatus = "Not running"
         pipeline?.close()
         pipeline = null
         overlay.hide()

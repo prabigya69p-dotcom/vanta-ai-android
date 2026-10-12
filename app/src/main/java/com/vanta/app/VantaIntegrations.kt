@@ -133,7 +133,10 @@ private class GoogleWorkspaceClient(context: Context) {
             val status = connection.responseCode
             val response = (if (status in 200..299) connection.inputStream else connection.errorStream)
                 ?.bufferedReader()?.use { it.readText() }.orEmpty()
-            if (status == 401) throw IllegalStateException("Google access token expired. Reconnect Google in Vanta Settings.")
+            if (status == 401) {
+                runCatching { store.clearGoogleAccessToken() }
+                throw IllegalStateException("Google access token expired. Reconnect Google in VANTA Settings.")
+            }
             if (status == 403) {
                 val detail = runCatching { JSONObject(response).optJSONObject("error")?.optString("message").orEmpty() }
                     .getOrDefault("").take(160)
