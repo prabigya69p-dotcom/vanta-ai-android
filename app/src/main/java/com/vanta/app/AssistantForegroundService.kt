@@ -11,6 +11,7 @@ import android.content.pm.PackageManager
 import android.content.pm.ServiceInfo
 import android.os.Build
 import android.os.IBinder
+import android.os.PowerManager
 import android.speech.tts.TextToSpeech
 import android.speech.tts.UtteranceProgressListener
 import androidx.core.app.NotificationCompat
@@ -64,6 +65,7 @@ class AssistantForegroundService : Service(), TextToSpeech.OnInitListener {
     private var ttsReady = false
     private var pendingSpeech: String? = null
     private lateinit var overlay: OverlayViewManager
+    private var wakeLock: PowerManager.WakeLock? = null
 
     override fun onCreate() {
         super.onCreate()
@@ -71,6 +73,16 @@ class AssistantForegroundService : Service(), TextToSpeech.OnInitListener {
         createNotificationChannel()
         overlay = OverlayViewManager(this)
         tts = TextToSpeech(this, this)
+        val powerManager = getSystemService(Context.POWER_SERVICE) as PowerManager
+        wakeLock = runCatching {
+            powerManager.newWakeLock(
+                PowerManager.PARTIAL_WAKE_LOCK,
+                packageName + ":ArgonWakeListener"
+            ).apply {
+                setReferenceCounted(false)
+                acquire()
+            }
+        }.getOrNull()
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -262,6 +274,10 @@ class AssistantForegroundService : Service(), TextToSpeech.OnInitListener {
         tts?.stop()
         tts?.shutdown()
         tts = null
+        wakeLock?.let { lock ->
+            if (lock.isHeld) runCatching { lock.release() }
+        }
+        wakeLock = null
         serviceJob.cancel()
         super.onDestroy()
     }
