@@ -109,7 +109,7 @@ class AssistantForegroundService : Service(), TextToSpeech.OnInitListener {
             ACTION_PROCESSING -> activePipeline.markProcessing()
             ACTION_RESUME -> activePipeline.resumeListening()
             ACTION_SPEAK -> {
-                val text = intent.getStringExtra(EXTRA_SPEECH).orEmpty()
+                val text = intent?.getStringExtra(EXTRA_SPEECH).orEmpty()
                 serviceScope.launch {
                     activePipeline.pauseForSpeech()
                     withContext(Dispatchers.Main.immediate) { queueSpeech(text) }
