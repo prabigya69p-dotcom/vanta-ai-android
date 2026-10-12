@@ -232,6 +232,7 @@ jobs:
           FISH_API_KEY: ${{ secrets.FISH_API_KEY }}
           FISH_VOICE_ID: ${{ vars.FISH_VOICE_ID }}
           GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
+          PICOVOICE_ACCESS_KEY: ${{ secrets.PICOVOICE_ACCESS_KEY }}
         run: gradle testDebugUnitTest assembleDebug --stacktrace
 
       - name: Print debug signing SHA-1 fingerprint

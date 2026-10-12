@@ -19,7 +19,7 @@ class BootReceiver : BroadcastReceiver() {
             ) != PackageManager.PERMISSION_GRANTED
         ) return
 
-        val serviceIntent = Intent(context, WakeService::class.java)
+        val serviceIntent = Intent(context, AssistantForegroundService::class.java)
         try {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                 ContextCompat.startForegroundService(context, serviceIntent)

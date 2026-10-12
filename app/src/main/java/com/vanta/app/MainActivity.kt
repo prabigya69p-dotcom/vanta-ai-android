@@ -99,7 +99,7 @@ class MainActivity : ComponentActivity() {
         pendingSpeechResult = null
         pendingSpeechFailure = null
         if (granted && callback != null) {
-            WakeService.pause(this@MainActivity)
+            WakeService.beginUserRecording(this@MainActivity)
             startListeningInternal(callback, failure ?: {})
         } else {
             WakeService.resume(this@MainActivity)
@@ -122,7 +122,9 @@ class MainActivity : ComponentActivity() {
             engine.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
                 override fun onStart(utteranceId: String?) { WakeService.pause(this@MainActivity) }
                 override fun onDone(utteranceId: String?) { WakeService.resume(this@MainActivity) }
-                override fun onError(utteranceId: String?) { WakeService.resume(this@MainActivity) }
+                override fun onError(utteranceId: String?) {
+                    // Fail closed: don't restart wake capture after a TTS error.
+                }
             })
         }
         setContent { VantaApp(store, memory, this, incomingImage, incomingWakeQuery) }
@@ -168,46 +170,64 @@ class MainActivity : ComponentActivity() {
 
     fun speak(text: String) {
         stopListening()
+        // Stop local wake-word capture before any assistant audio begins.
+        WakeService.pause(this)
+
         val fishKey = store.loadFishAudioApiKey()
         val fishReference = store.loadFishAudioReferenceId()
         if (fishKey.isNotBlank()) {
-            WakeService.pause(this)
             Thread {
                 val audio = FishAudioApi.synthesize(this, fishKey, fishReference, text)
                 runOnUiThread {
                     if (audio == null) {
-                        WakeService.resume(this)
-                        applyTtsSettings()
-                        tts?.speak(text, TextToSpeech.QUEUE_FLUSH, null, "vanta_reply")
+                        speakFallback(text, "vanta_reply")
                     } else {
-                        fishPlayer?.release()
+                        runCatching { fishPlayer?.release() }
                         fishPlayer = MediaPlayer().apply {
-                            setDataSource(audio.absolutePath)
-                            setOnCompletionListener {
-                                release()
+                            try {
+                                setDataSource(audio.absolutePath)
+                                setOnCompletionListener {
+                                    release()
+                                    fishPlayer = null
+                                    audio.delete()
+                                    // Fish Audio resumes only after its playback ends.
+                                    WakeService.resume(this@MainActivity)
+                                }
+                                setOnErrorListener { player, _, _ ->
+                                    runCatching { player.release() }
+                                    fishPlayer = null
+                                    audio.delete()
+                                    speakFallback(text, "vanta_reply_fallback")
+                                    true
+                                }
+                                prepare()
+                                start()
+                            } catch (_: Exception) {
+                                runCatching { release() }
                                 fishPlayer = null
                                 audio.delete()
-                                WakeService.resume(this@MainActivity)
+                                speakFallback(text, "vanta_reply_fallback")
                             }
-                            setOnErrorListener { player, _, _ ->
-                                player.release()
-                                fishPlayer = null
-                                audio.delete()
-                                WakeService.resume(this@MainActivity)
-                                applyTtsSettings()
-                                tts?.speak(text, TextToSpeech.QUEUE_FLUSH, null, "vanta_reply_fallback")
-                                true
-                            }
-                            prepare()
-                            start()
                         }
                     }
                 }
             }.start()
             return
         }
-        applyTtsSettings()
-        tts?.speak(text, TextToSpeech.QUEUE_FLUSH, null, "vanta_reply")
+        speakFallback(text, "vanta_reply")
+    }
+
+    private fun speakFallback(text: String, utteranceId: String) {
+        val handsFreeReady = store.loadWakeEnabled() &&
+            ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) ==
+            PackageManager.PERMISSION_GRANTED
+        if (handsFreeReady) {
+            // The foreground service owns the pause/onDone/resume lifecycle during hands-free TTS.
+            AssistantForegroundService.speak(this, text)
+        } else {
+            applyTtsSettings()
+            tts?.speak(text, TextToSpeech.QUEUE_FLUSH, null, utteranceId)
+        }
     }
 
     fun listen(onText: (String) -> Unit) {
@@ -227,7 +247,7 @@ class MainActivity : ComponentActivity() {
             return
         }
         stopSpeaking()
-        WakeService.pause(this)
+        WakeService.beginUserRecording(this)
         startListeningInternal(onText, onFailure)
     }
 
@@ -258,12 +278,13 @@ class MainActivity : ComponentActivity() {
             completed = true
             if (recognizer === currentRecognizer) recognizer = null
             try { currentRecognizer.destroy() } catch (_: RuntimeException) { }
-            WakeService.resume(this@MainActivity)
-
             val cleanedTranscript = transcript?.trim()?.takeIf { it.isNotEmpty() }
             if (cleanedTranscript != null) {
+                // Keep hotword capture off while VANTA handles the command and prepares its answer.
+                WakeService.processing(this@MainActivity)
                 onText(cleanedTranscript)
             } else {
+                WakeService.resume(this@MainActivity)
                 onFailure(failureMessage ?: "I didn't catch that. Please try again.")
             }
         }
