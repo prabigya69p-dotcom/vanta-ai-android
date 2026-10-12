@@ -211,6 +211,20 @@ jobs:
           test -f settings.gradle.kts
           test -f app/build.gradle.kts
 
+      - name: Create standard Android debug keystore
+        run: |
+          set -euo pipefail
+          mkdir -p "$HOME/.android"
+          if [ ! -f "$HOME/.android/debug.keystore" ]; then
+            keytool -genkeypair -v -noprompt \
+              -keystore "$HOME/.android/debug.keystore" \
+              -storepass android \
+              -alias androiddebugkey \
+              -keypass android \
+              -keyalg RSA -keysize 2048 -validity 10000 \
+              -dname "CN=Android Debug,O=Android,C=US"
+          fi
+
       - name: Run Android unit tests and build APK
         env:
           NVIDIA_API_KEY: ${{ secrets.NVIDIA_API_KEY }}
