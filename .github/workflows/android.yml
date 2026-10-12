@@ -212,6 +212,20 @@ jobs:
           test -f settings.gradle.kts
           test -f app/build.gradle.kts
 
+      - name: Restore stable Android debug signing key for Google OAuth
+        env:
+          ANDROID_DEBUG_KEYSTORE_B64: ${{ secrets.ANDROID_DEBUG_KEYSTORE_B64 }}
+        run: |
+          set -euo pipefail
+          mkdir -p "$HOME/.android"
+          if [ -n "${ANDROID_DEBUG_KEYSTORE_B64:-}" ]; then
+            printf '%s' "$ANDROID_DEBUG_KEYSTORE_B64" | base64 --decode > "$HOME/.android/debug.keystore"
+            keytool -list -keystore "$HOME/.android/debug.keystore" -storepass android -alias androiddebugkey >/dev/null
+            echo "Restored stable Android debug signing key."
+          else
+            echo "::warning::ANDROID_DEBUG_KEYSTORE_B64 is missing; debug SHA-1 will change on new hosted runners and Google Android OAuth may fail."
+          fi
+
       - name: Create standard Android debug keystore
         run: |
           set -euo pipefail
