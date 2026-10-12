@@ -1483,7 +1483,11 @@ private fun PermissionsScreen(store: VantaStore, activity: MainActivity, onBack:
         PermissionStatusRow("Internet", "Required for AI and Google APIs.", "Granted automatically")
         PermissionStatusRow("Wake lock", "Helps hold the CPU awake while listening.", "Granted automatically")
         PermissionStatusRow("Run after reboot", "Android may restrict microphone services from starting at boot.", "Granted automatically")
-        PermissionStatusRow("Foreground microphone service", "Ongoing notification while listening.", "Declared in manifest")
+        PermissionStatusRow("Foreground service permission", "Allows VANTA to run a visible foreground service.", "Granted automatically")
+        PermissionStatusRow("Microphone foreground-service type", "Declares microphone use while the foreground service is active.", "Declared in manifest")
+        PermissionStatusRow("Boot completed receiver", "Enables VANTA to receive the Android boot-completed broadcast; Android may still restrict microphone startup.", "Declared in manifest")
+        PermissionStatusRow("Battery optimization request", "Special access is managed above; use Allow to request an exemption.", if (batteryExempt) "Exempt" else "Not exempt")
+        PermissionStatusRow("Overlay permission", "Special permission required for the floating Argon status pill.", if (overlay) "Granted" else "Not granted", "Open settings", { specialSettings(Settings.ACTION_MANAGE_OVERLAY_PERMISSION) })
         Spacer(Modifier.height(8.dp))
         Text("GOOGLE WORKSPACE", color = Color(0xFF71C2FF), fontSize = 13.sp)
         PermissionStatusRow("Gmail, Calendar & Tasks", "Private data needs Google account consent; API key alone cannot grant access.",
@@ -1514,10 +1518,13 @@ private fun PermissionStatusRow(title: String, detail: String, status: String, a
                 Text(detail, color = Color(0xFF8EA8C3), fontSize = 11.sp)
             }
             Spacer(Modifier.width(8.dp))
-            Text(status, color = if (status.contains("granted", true) || status.contains("enabled", true) ||
-                status.contains("exempt", true) || status.contains("configured", true) || status.contains("listening", true) ||
-                status.contains("connected", true) || status.contains("automatically", true) || status.contains("declared", true))
-                Color(0xFF73E6A8) else Color(0xFFFFC278), fontSize = 11.sp)
+            val normalizedStatus = status.trim().lowercase(Locale.ROOT)
+            val positive = normalizedStatus.startsWith("granted") ||
+                normalizedStatus == "enabled" || normalizedStatus == "exempt" ||
+                normalizedStatus == "configured" || normalizedStatus.startsWith("listening") ||
+                normalizedStatus.startsWith("authorization saved") ||
+                normalizedStatus == "declared in manifest"
+            Text(status, color = if (positive) Color(0xFF73E6A8) else Color(0xFFFFC278), fontSize = 11.sp)
         }
         if (actionLabel != null && onAction != null) TextButton(onClick = onAction) { Text(actionLabel) }
         Divider(color = Color(0xFF20364D))
