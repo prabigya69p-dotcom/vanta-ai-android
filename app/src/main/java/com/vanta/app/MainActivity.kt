@@ -1461,8 +1461,13 @@ private fun PermissionsScreen(store: VantaStore, activity: MainActivity, onBack:
                     store.saveWakeEnabled(true); WakeService.start(context); refresh++
                 }
             })
-        PermissionStatusRow("Overlay / floating status", "Allows Argon's status pill over other apps.", if (overlay) "Granted" else "Not granted",
+        PermissionStatusRow("Display over other apps", "Required to keep the VANTA orb visible over chat, calls, and other apps.", if (overlay) "Granted" else "Not granted",
             "Open settings", { specialSettings(Settings.ACTION_MANAGE_OVERLAY_PERMISSION) })
+        PermissionStatusRow("Floating orb / call mode", "Launch the separate VANTA Orb shortcut. Tap the orb for controls; choose Minimize · call mode to keep it small in a screen corner.",
+            if (overlay) "Ready" else "Needs overlay access", if (overlay) "Show orb" else "Grant access", {
+                if (Settings.canDrawOverlays(context)) context.startActivity(Intent(context, OrbLauncherActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+                else specialSettings(Settings.ACTION_MANAGE_OVERLAY_PERMISSION)
+            })
         PermissionStatusRow("Battery optimization", "Exemption may improve background listening; Android may still restrict it.",
             if (batteryExempt) "Exempt" else "Optimized", if (batteryExempt) "Manage" else "Allow", {
                 if (batteryExempt) specialSettings(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS)
@@ -1487,7 +1492,6 @@ private fun PermissionsScreen(store: VantaStore, activity: MainActivity, onBack:
         PermissionStatusRow("Microphone foreground-service type", "Declares microphone use while the foreground service is active.", "Declared in manifest")
         PermissionStatusRow("Boot completed receiver", "Enables VANTA to receive the Android boot-completed broadcast; Android may still restrict microphone startup.", "Declared in manifest")
         PermissionStatusRow("Battery optimization request", "Special access is managed above; use Allow to request an exemption.", if (batteryExempt) "Exempt" else "Not exempt")
-        PermissionStatusRow("Overlay permission", "Special permission required for the floating Argon status pill.", if (overlay) "Granted" else "Not granted", "Open settings", { specialSettings(Settings.ACTION_MANAGE_OVERLAY_PERMISSION) })
         Spacer(Modifier.height(8.dp))
         Text("GOOGLE WORKSPACE", color = Color(0xFF71C2FF), fontSize = 13.sp)
         PermissionStatusRow("Gmail, Calendar & Tasks", "Private data needs Google account consent; API key alone cannot grant access.",
