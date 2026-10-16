@@ -8,21 +8,21 @@
     </queries>
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+    <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
     <uses-permission android:name="android.permission.CAMERA" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
     <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
-
     <application
         android:theme="@style/Theme.Vanta"
         android:label="VANTA"
         android:allowBackup="true"
         android:supportsRtl="true">
         <activity android:name=".GoogleWorkspaceAuthActivity" android:exported="false" />
-        <activity
-            android:name=".MainActivity"
-            android:exported="true"
-            android:launchMode="singleTop">
+        <activity android:name=".MainActivity" android:exported="true" android:launchMode="singleTop">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
@@ -40,38 +40,17 @@
                 <data android:mimeType="image/*" />
             </intent-filter>
         </activity>
-
-        <service
-            android:name=".NotificationDigestService"
-            android:label="VANTA notification digest"
-            android:permission="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE"
-            android:exported="true">
-            <intent-filter>
-                <action android:name="android.service.notification.NotificationListenerService" />
-            </intent-filter>
+        <service android:name=".NotificationDigestService" android:label="VANTA notification digest" android:permission="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE" android:exported="true">
+            <intent-filter><action android:name="android.service.notification.NotificationListenerService" /></intent-filter>
         </service>
-
-        <service
-            android:name=".ArgonAccessibilityService"
-            android:label="Argon screen controls"
-            android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE"
-            android:exported="true">
-            <intent-filter>
-                <action android:name="android.accessibilityservice.AccessibilityService" />
-            </intent-filter>
-            <meta-data
-                android:name="android.accessibilityservice"
-                android:resource="@xml/argon_accessibility_service" />
+        <service android:name=".AssistantForegroundService" android:exported="false" android:foregroundServiceType="microphone" />
+        <service android:name=".ArgonAccessibilityService" android:label="Argon screen controls" android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE" android:exported="true">
+            <intent-filter><action android:name="android.accessibilityservice.AccessibilityService" /></intent-filter>
+            <meta-data android:name="android.accessibilityservice" android:resource="@xml/argon_accessibility_service" />
         </service>
-
         <receiver android:name=".ReminderReceiver" android:exported="false" />
-        <receiver
-            android:name=".BootReceiver"
-            android:enabled="true"
-            android:exported="true">
-            <intent-filter>
-                <action android:name="android.intent.action.BOOT_COMPLETED" />
-            </intent-filter>
+        <receiver android:name=".BootReceiver" android:enabled="true" android:exported="true">
+            <intent-filter><action android:name="android.intent.action.BOOT_COMPLETED" /></intent-filter>
         </receiver>
     </application>
 </manifest>
