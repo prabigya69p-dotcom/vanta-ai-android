@@ -8,13 +8,9 @@
     </queries>
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
-    <uses-permission android:name="android.permission.WAKE_LOCK" />
-    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
-    <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
     <uses-permission android:name="android.permission.CAMERA" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
-    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
     <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
 
     <application
@@ -56,11 +52,6 @@
         </service>
 
         <service
-            android:name=".AssistantForegroundService"
-            android:exported="false"
-            android:foregroundServiceType="microphone" />
-
-        <service
             android:name=".ArgonAccessibilityService"
             android:label="Argon screen controls"
             android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE"
@@ -73,10 +64,7 @@
                 android:resource="@xml/argon_accessibility_service" />
         </service>
 
-        <receiver
-            android:name=".ReminderReceiver"
-            android:exported="false" />
-
+        <receiver android:name=".ReminderReceiver" android:exported="false" />
         <receiver
             android:name=".BootReceiver"
             android:enabled="true"
